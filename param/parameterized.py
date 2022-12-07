@@ -16,7 +16,7 @@ import inspect
 import random
 import numbers
 import operator
-from typing import Any, Callable, Tuple, Union
+from typing import Any, Callable, Dict, Tuple, Union
 
 # Allow this file to be used standalone if desired, albeit without JSON serialization
 try:
@@ -905,7 +905,7 @@ class Parameter(metaclass=ParameterMetaclass):
     # http://www.python.org/doc/2.4/ref/slots.html). 
 
     __slots__ = ['name', '_internal_name', 'default', 'doc',
-                 'precedence', 'deep_copy', 'constant', 'readonly',
+                 'precedence', '_deep_copy', 'constant', 'readonly',
                  'pickle_default_value', 'allow_None', 'per_instance',
                  'watchers', '_label']
 
@@ -916,10 +916,10 @@ class Parameter(metaclass=ParameterMetaclass):
 
     _serializers = {'json': serializer.JSONSerialization}
 
-    def __init__(self,default=None, doc=None, label=None, precedence=None,  # pylint: disable-msg=R0913
-                 deep_copy=False, constant=False, readonly=False,
-                 pickle_default_value=True, allow_None=False,
-                 per_instance=True, name=None):
+    def __init__(self, default : Any = None, doc : str = None, label : str = None, 
+                 deep_copy : bool = False, constant : bool = False, readonly : bool = False,
+                 pickle_default_value : bool = True, allow_None : bool = False,
+                 per_instance : bool = True, precedence : float = None):  # pylint: disable-msg=R0913
 
         """Initialize a new Parameter object and store the supplied attributes:
 
@@ -928,16 +928,37 @@ class Parameter(metaclass=ParameterMetaclass):
 
         doc: docstring explaining what this parameter represents.
 
+        constant: if true, the Parameter value can be changed only at
+        the class level or in a Parameterized constructor call. The
+        value is otherwise constant on the Parameterized instance,
+        once it has been constructed.
+
+        readonly: if true, the Parameter value cannot ordinarily be
+        changed by setting the attribute at the class or instance
+        levels at all. The value can still be changed in code by
+        temporarily overriding the value of this slot and then
+        restoring it, which is useful for reporting values that the
+        _user_ should never change but which do change during code
+        execution.
+
+        per_instance: whether a separate Parameter instance will be
+        created for every Parameterized instance. True by default.
+        If False, all instances of a Parameterized class will share
+        the same Parameter object, including all validation
+        attributes (bounds, etc.). See also deep_copy, which is
+        conceptually similar but affects the Parameter value rather
+        than the Parameter object.
+
+        allow_None: if True, None is accepted as a valid value for
+        this Parameter, in addition to any other values that are
+        allowed. If the default value is defined as None, allow_None
+        is set to True automatically.
+
         label: optional text label to be used when this Parameter is
         shown in a listing. If no label is supplied, the attribute name
         for this parameter in the owning Parameterized object is used.
 
-        precedence: a numeric value, usually in the range 0.0 to 1.0,
-        which allows the order of Parameters in a class to be defined in
-        a listing or e.g. in GUI menus. A negative precedence indicates
-        a parameter that should be hidden in such listings.
-
-        deepcopy: controls whether the value of this Parameter will
+        deep_copy: controls whether the value of this Parameter will
         be deepcopied when a Parameterized object is instantiated (if
         True), or if the single default value will be shared by all
         Parameterized instances (if False). For an immutable Parameter
@@ -956,56 +977,31 @@ class Parameter(metaclass=ParameterMetaclass):
         because each instance, once created, will then have an
         independently deepcopied value.
 
-        constant: if true, the Parameter value can be changed only at
-        the class level or in a Parameterized constructor call. The
-        value is otherwise constant on the Parameterized instance,
-        once it has been constructed.
-
-        readonly: if true, the Parameter value cannot ordinarily be
-        changed by setting the attribute at the class or instance
-        levels at all. The value can still be changed in code by
-        temporarily overriding the value of this slot and then
-        restoring it, which is useful for reporting values that the
-        _user_ should never change but which do change during code
-        execution.
-
         pickle_default_value: whether the default value should be
         pickled. Usually, you would want the default value to be pickled,
         but there are rare cases where that would not be the case (e.g.
         for file search paths that are specific to a certain system).
 
-        per_instance: whether a separate Parameter instance will be
-        created for every Parameterized instance. True by default.
-        If False, all instances of a Parameterized class will share
-        the same Parameter object, including all validation
-        attributes (bounds, etc.). See also deep_copy, which is
-        conceptually similar but affects the Parameter value rather
-        than the Parameter object.
-
-        allow_None: if True, None is accepted as a valid value for
-        this Parameter, in addition to any other values that are
-        allowed. If the default value is defined as None, allow_None
-        is set to True automatically.
-
-        name: the name of the parameter to be used when stored inside 
-        the dictionary of the object to which the parameter is bound.
-        mandatory, if object is not of Parameterized class. 
+        precedence: a numeric value, usually in the range 0.0 to 1.0,
+        which allows the order of Parameters in a class to be defined in
+        a listing or e.g. in GUI menus. A negative precedence indicates
+        a parameter that should be hidden in such listings.
 
         default, doc, and precedence all default to None, which allows
         inheritance of Parameter slots (attributes) from the owning-class'
         class hierarchy (see ParameterizedMetaclass).
         """
 
-        self.name = None
         setattr(self, 'owner', None)
+        self.name = None
         self.precedence = precedence
         self.default = default
         self.doc = doc
         self.constant = constant or readonly # readonly => constant
         self.readonly = readonly
         self._label = label
-        self._internal_name = name
-        self._set_deep_copy(deep_copy)
+        self._internal_name = None
+        self.deep_copy = deep_copy
         self.pickle_default_value = pickle_default_value
         self.allow_None = (default is None or allow_None)
         self.watchers = {}
@@ -1029,16 +1025,16 @@ class Parameter(metaclass=ParameterMetaclass):
         self._internal_name = "_%s_param_value" % attrib_name
         
     @classmethod
-    def serialize(cls, value):
+    def serialize(cls, value : Any) -> Any:
         "Given the parameter value, return a Python value suitable for serialization"
         return value
 
     @classmethod
-    def deserialize(cls, value):
+    def deserialize(cls, value : Any) -> Any:
         "Given a serializable Python value, return a value that the parameter can be set to"
         return value
 
-    def schema(self, safe=False, subset=None, mode='json'):
+    def schema(self, safe : bool = False, subset=None, mode : str = 'json') -> Dict[str, Any]:
         if serializer is None:
             raise ImportError('Cannot import serializer.py needed to generate schema')
         if mode not in  self._serializers:
@@ -1048,48 +1044,53 @@ class Parameter(metaclass=ParameterMetaclass):
                                                     safe=safe, subset=subset)
 
     @property
-    def label(self):
+    def label(self) -> str:
         if self.name and self._label is None:
             return label_formatter(self.name)
         else:
             return self._label
 
     @label.setter
-    def label(self, val):
+    def label(self, val : str) -> None:
         self._label = val
 
-    def _set_deep_copy(self,deep_copy):
+    @property
+    def deep_copy(self) -> bool:
+        return self._deep_copy
+    
+    @deep_copy.setter
+    def deep_copy(self, deep_copy : bool) -> None:
         """Constant parameters must be deep_copied."""
-        # instantiate doesn't actually matter for read-only
+        # deep_copy doesn't actually matter for read-only
         # parameters, since they can't be set even on a class.  But
         # having this code avoids needless instantiation.
         if self.readonly:
-            self.deep_copy = False
+            self._deep_copy = False
         else:
-            self.deep_copy = deep_copy or self.constant # pylint: disable-msg=W0201
+            self._deep_copy = deep_copy or self.constant # pylint: disable-msg=W0201
 
-    def __setattr__(self, attribute, value):
-        if attribute == 'name' and getattr(self, 'name', None) and value != self.name:
+    def __setattr__(self, attribute : str, value : Any) -> None:
+        if attribute == 'name' and getattr(self, 'name', None):
             raise AttributeError("Parameter name cannot be modified after "
                                  "it has been bound to a Parameterized.")
 
-        implemented = (attribute != "default" and hasattr(self, 'watchers') and attribute in self.watchers)
+        watched = (attribute != "default" and hasattr(self, 'watchers') and attribute in self.watchers)
         slot_attribute = attribute in self.__slots__
         try:
-            old = getattr(self, attribute) if implemented else NotImplemented
+            old = getattr(self, attribute) if watched else not watched
             if slot_attribute:
                 self._on_set(attribute, old, value)
         except AttributeError as e:
             if slot_attribute:
                 # If Parameter slot is defined but an AttributeError was raised
                 # we are in __setstate__ and watchers should not be triggered
-                old = NotImplemented
+                old = not watched
             else:
                 raise e
 
         super(Parameter, self).__setattr__(attribute, value)
 
-        if old is NotImplemented:
+        if old is not watched:
             return
 
         event = Event(what=attribute, name=self.name, obj=None, cls=self.owner,
@@ -1099,13 +1100,13 @@ class Parameter(metaclass=ParameterMetaclass):
         if not self.owner.param._BATCH_WATCH:
             self.owner.param._batch_call_watchers()
 
-    def _on_set(self, attribute, old, value):
+    def _on_set(self, attribute : str, old : Any, value : Any) -> None:
         """
         Can be overridden on subclasses to handle changes when parameter
         attribute is set.
         """
 
-    def __get__(self, obj, objtype): # pylint: disable-msg=W0613
+    def __get__(self, obj : Union['Parameterized', Any], objtype : Union['ParameterizedMetaclass', Any]): # pylint: disable-msg=W0613
         """
         Return the value for this Parameter.
 
@@ -1124,7 +1125,7 @@ class Parameter(metaclass=ParameterMetaclass):
         return result
 
     @instance_descriptor
-    def __set__(self, obj, val):
+    def __set__(self, obj : Union['Parameterized', Any], val : Any) -> None:
         """
         Set the value for this Parameter.
 
@@ -1149,110 +1150,81 @@ class Parameter(metaclass=ParameterMetaclass):
         object stored in a constant or read-only Parameter (e.g. one
         item in a list).
         """
-        # if obj is not None:
-        #     if not isinstance(obj, Parameterized):
-        #         if self._internal_name is None or not isinstance(self._internal_name, str):
-        #             raise NameError(
-        #             wrap_error_text("""either unnamed descriptor parameter found or name not of type string in class {},\
-        #             please set name in descriptor __init__ through name argument (accepts string).\
-        #             Descriptor type : {}.
-        #             """.format(obj, type(self))))
-        #         if self.name is None:
-        #             self.name = self._internal_name
-
+        if self.readonly:
+            raise TypeError("Read-only parameter '%s' cannot be set/modified" % self.name)
+    
         self.validate(val)
 
         _old = NotImplemented
         # obj can be None if __set__ is called for a Parameterized class
-        if self.constant or self.readonly:
-            if self.readonly:
-                raise TypeError("Read-only parameter '%s' cannot be modified" % self.name)
-            elif obj is None:
-                _old = self.default
-                self.default = val
-            elif not isinstance(obj, Parameterized):               
-                if obj.__dict__.get(self._internal_name, None) is None:
-                    obj.__dict__[self._internal_name] = val
-                    _old = self.default
-                else:
-                    raise TypeError("Constant parameter '%s' cannot be modified"%self.name)
-            # If its parameterized, it will have initialized attribute
-            elif not obj.initialized:
-                _old = obj.__dict__.get(self._internal_name, self.default)
+        if self.constant:
+            if obj.__dict__.get(self._internal_name, NotImplemented) is NotImplemented:
                 obj.__dict__[self._internal_name] = val
             else:
                 _old = obj.__dict__.get(self._internal_name, self.default)
                 if val is not _old:
                     raise TypeError("Constant parameter '%s' cannot be modified"%self.name)
         else:
-            if obj is None:
-                _old = self.default
-                self.default = val
-            else:
-                _old = obj.__dict__.get(self._internal_name, self.default)
-                obj.__dict__[self._internal_name] = val
+            _old = obj.__dict__.get(self._internal_name, self.default)
+            obj.__dict__[self._internal_name] = val
 
         self._post_setter(obj, val) 
 
-        if obj is not None:        
-            if not isinstance(obj, Parameterized):
-                """
-                dont deal with events, watchers etc when object
-                is not a Parameterized class child
-                Many other variables like obj.param below 
-                will also raise AttributeError
-                """
-                return           
-            if not getattr(obj, 'initialized', False):
-                return
-            obj.param._update_deps(self.name)
-
-        if obj is None:
-            watchers = self.watchers.get("value")
-        elif hasattr(obj, '_param_watchers') and self.name in obj._param_watchers:
-            watchers = obj._param_watchers[self.name].get('value')
-            if watchers is None:
-                watchers = self.watchers.get("value")
-        else:
-            watchers = None
-
-        obj = self.owner if obj is None else obj
-
-        if obj is None or not watchers:
+        if not isinstance(obj, Parameterized):
+            """
+            dont deal with events, watchers etc when object
+            is not a Parameterized class child
+            Many other variables like obj.param below 
+            will also raise AttributeError
+            """
+            return           
+        if not getattr(obj, 'initialized', False):
             return
+        # obj.param._update_deps(self.name)
 
-        event = Event(what='value', name=self.name, obj=obj, cls=self.owner,
-                      old=_old, new=val, type=None)
+        # if obj is None:
+        #     watchers = self.watchers.get("value")
+        # elif hasattr(obj, '_param_watchers') and self.name in obj._param_watchers:
+        #     watchers = obj._param_watchers[self.name].get('value')
+        #     if watchers is None:
+        #         watchers = self.watchers.get("value")
+        # else:
+        #     watchers = None
 
-        # Copy watchers here since they may be modified inplace during iteration
-        for watcher in sorted(watchers, key=lambda w: w.precedence):
-            obj.param._call_watcher(watcher, event)
-        if not obj.param._BATCH_WATCH:
-            obj.param._batch_call_watchers()
+        # obj = self.owner if obj is None else obj
 
-    def _validate_value(self, value, allow_None):
+        # if obj is None or not watchers:
+        #     return
+
+        # event = Event(what='value', name=self.name, obj=obj, cls=self.owner,
+        #               old=_old, new=val, type=None)
+
+        # # Copy watchers here since they may be modified inplace during iteration
+        # for watcher in sorted(watchers, key=lambda w: w.precedence):
+        #     obj.param._call_watcher(watcher, event)
+        # if not obj.param._BATCH_WATCH:
+        #     obj.param._batch_call_watchers()
+
+    def _validate_value(self, value : Any, allow_None : bool) -> None:
         """Implements validation for parameter value"""
+        return True 
 
-    def adapt(self, val):
+    def adapt(self, val : Any) -> Any:
         """
-        This function is used for modify the given values,
-        say a proper logical conversion of type. Useful mainly for 
-        custom types and not for param package specific types.
-        returns modified value. 
+        modify the given value if a proper logical reasoning can be given.
+        returns modified value. Should not be mostly used unless the data stored is quite complex by structure.
         """
         return val
 
-    def validate(self, val):
+    def validate(self, val : Any) -> None:
         """Implements validation for the parameter value and attributes"""
         val = self.adapt(val)
         self._validate_value(val, self.allow_None)
 
-    _validate : Callable = validate
-    
-    def _post_setter(self, obj, val):
+    def _post_setter(self, obj : Union['Parameterized', Any], val : Any) -> None:
         """Called after the parameter value has been validated and set"""
 
-    def __delete__(self,obj):
+    def __delete__(self, obj : Union['Parameterized', Any]):
         raise TypeError("Cannot delete '%s': Parameters deletion not allowed." % self.name)
 
     def __getstate__(self):
@@ -1265,9 +1237,10 @@ class Parameter(metaclass=ParameterMetaclass):
             state[slot] = getattr(self,slot)
         return state
 
-    def __setstate__(self,state):
-        # set values of __slots__ (instead of in non-existent __dict__)
-
+    def __setstate__(self, state : Dict):
+        """
+        set values of __slots__ (instead of in non-existent __dict__)
+        """
         # Handle renamed slots introduced for instance params
         if '_attrib_name' in state:
             state['name'] = state.pop('_attrib_name')
@@ -1335,7 +1308,7 @@ class shared_parameters(object):
     """
     Context manager to share parameter instances when creating
     multiple Parameterized objects of the same type. Parameter default
-    values are instantiated once and cached to be reused when another
+    values are deepcopied once and cached to be reused when another
     Parameterized object of the same type is instantiated.
     Can be useful to easily modify large collections of Parameterized
     objects at once and can provide a significant speedup.
@@ -1588,7 +1561,7 @@ class Parameters(object):
         """
         Initialize default and keyword parameter values.
 
-        First, ensures that all Parameters with 'instantiate=True'
+        First, ensures that all Parameters with 'deep_copy=True'
         (typically used for mutable Parameters) are copied directly
         into each object, to ensure that there is an independent copy
         (to avoid surprising aliasing errors).  Then sets each of the
@@ -1598,7 +1571,7 @@ class Parameters(object):
         Constant Parameters can be set during calls to this method.
         """
         self = self_.param.self
-        ## Deepcopy all 'instantiate=True' parameters
+        ## Deepcopy all 'deep_copy=True' parameters
         # (building a set of names first to avoid redundantly
         # instantiating a later-overridden parent class's parameter)
         param_values_to_deep_copy = {}
@@ -2490,8 +2463,8 @@ class Parameters(object):
         for param_name, param in self.param.objects('existing').items():
             if param.constant:
                 pass
-            if param.instantiate:
-                self.param._instantiate_param(param, dict_=d, key=param_name)
+            if param.deep_copy:
+                self.param._deep_copy_param(param, dict_=d, key=param_name)
             d[param_name] = param.default
         return d
 
@@ -2760,7 +2733,9 @@ class ParameterizedMetaclass(type):
             #     parameter = copy.copy(parameter)
             #     parameter.owner = mcs
             #     type.__setattr__(mcs, attribute_name, parameter)
-            mcs.__dict__[attribute_name].__set__(None,value)
+            mcs.__dict__[attribute_name].__set__(mcs, value)
+            # set with None should not supported as with mcs it supports 
+            # class attributes which can be validated
         else:
             type.__setattr__(mcs, attribute_name, value)
             if isinstance(value, Parameter):
@@ -2786,7 +2761,7 @@ class ParameterizedMetaclass(type):
 # Whether script_repr should avoid reporting the values of parameters
 # that are just inheriting their values from the class defaults.
 # Because deepcopying creates a new object, cannot detect such
-# inheritance when instantiate = True, so such values will be printed
+# inheritance when deep_copy = True, so such values will be printed
 # even if they are just being copied from the default.
 script_repr_suppress_defaults=True
 
