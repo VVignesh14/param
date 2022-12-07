@@ -276,28 +276,6 @@ def all_equal(arg1,arg2):
         return arg1==arg2
 
 
-# PARAM2_DEPRECATION: For Python 2 compatibility only; can be removed in param2.
-#
-# The syntax to use a metaclass changed incompatibly between 2 and
-# 3. The add_metaclass() class decorator below creates a class using a
-# specified metaclass in a way that works on both 2 and 3. For 3, can
-# remove this decorator and specify metaclasses in a simpler way
-# (https://docs.python.org/3/reference/datamodel.html#customizing-class-creation)
-#
-# Code from six (https://bitbucket.org/gutworth/six; version 1.4.1).
-def add_metaclass(metaclass):
-    """Class decorator for creating a class with a metaclass."""
-    def wrapper(cls):
-        orig_vars = cls.__dict__.copy()
-        orig_vars.pop('__dict__', None)
-        orig_vars.pop('__weakref__', None)
-        for slots_var in orig_vars.get('__slots__', ()):
-            orig_vars.pop(slots_var)
-        return metaclass(cls.__name__, cls.__bases__, orig_vars)
-    return wrapper
-
-
-
 class bothmethod(object): # pylint: disable-msg=R0903
     """
     'optional @classmethod'
@@ -831,9 +809,7 @@ class ParameterMetaclass(type):
             return type.__getattribute__(mcs,name)
 
 
-
-@add_metaclass(ParameterMetaclass)
-class Parameter(object):
+class Parameter(metaclass=ParameterMetaclass):
     """
     An attribute descriptor for declaring parameters.
 
@@ -912,44 +888,11 @@ class Parameter(object):
     the behavior described here.
     """
 
-    # Because they implement __get__ and __set__, Parameters are known
-    # as 'descriptors' in Python; see "Implementing Descriptors" and
-    # "Invoking Descriptors" in the 'Customizing attribute access'
-    # section of the Python reference manual:
-    # http://docs.python.org/ref/attribute-access.html
-    #
-    # Overview of Parameters for programmers
-    # ======================================
-    #
-    # Consider the following code:
-    #
-    #
-    # class A(Parameterized):
-    #     p = Parameter(default=1)
-    #
-    # a1 = A()
-    # a2 = A()
-    #
-    #
-    # * a1 and a2 share one Parameter object (A.__dict__['p']).
-    #
-    # * The default (class) value of p is stored in this Parameter
-    #   object (A.__dict__['p'].default).
-    #
-    # * If the value of p is set on a1 (e.g. a1.p=2), a1's value of p
-    #   is stored in a1 itself (a1.__dict__['_p_param_value'])
-    #
-    # * When a1.p is requested, a1.__dict__['_p_param_value'] is
-    #   returned. When a2.p is requested, '_p_param_value' is not
-    #   found in a2.__dict__, so A.__dict__['p'].default (i.e. A.p) is
-    #   returned instead.
-    #
-    #
     # Be careful when referring to the 'name' of a Parameter:
     #
     # * A Parameterized class has a name for the attribute which is
-    #   being represented by the Parameter ('p' in the example above);
-    #   in the code, this is called the 'attrib_name'.
+    #   being represented by the Parameter in the code, 
+    #   this is called the 'attrib_name'.
     #
     # * When a Parameterized instance has its own local value for a
     #   parameter, it is stored as '_X_param_value' (where X is the
@@ -959,28 +902,22 @@ class Parameter(object):
 
     # So that the extra features of Parameters do not require a lot of
     # overhead, Parameters are implemented using __slots__ (see
-    # http://www.python.org/doc/2.4/ref/slots.html).  Instead of having
-    # a full Python dictionary associated with each Parameter instance,
-    # Parameter instances have an enumerated list (named __slots__) of
-    # attributes, and reserve just enough space to store these
-    # attributes.  Using __slots__ requires special support for
-    # operations to copy and restore Parameters (e.g. for Python
-    # persistent storage pickling); see __getstate__ and __setstate__.
+    # http://www.python.org/doc/2.4/ref/slots.html). 
+
     __slots__ = ['name', '_internal_name', 'default', 'doc',
-                 'precedence', 'instantiate', 'constant', 'readonly',
+                 'precedence', 'deep_copy', 'constant', 'readonly',
                  'pickle_default_value', 'allow_None', 'per_instance',
                  'watchers', '_label']
 
     # Note: When initially created, a Parameter does not know which
-    # Parameterized class owns it, nor does it know its names
-    # (attribute name, internal name). Once the owning Parameterized
+    # Parameterized class owns it. Once the owning Parameterized
     # class is created, owner, name, and _internal_name are
     # set.
 
     _serializers = {'json': serializer.JSONSerialization}
 
     def __init__(self,default=None, doc=None, label=None, precedence=None,  # pylint: disable-msg=R0913
-                 instantiate=False, constant=False, readonly=False,
+                 deep_copy=False, constant=False, readonly=False,
                  pickle_default_value=True, allow_None=False,
                  per_instance=True, name=None):
 
@@ -1000,11 +937,11 @@ class Parameter(object):
         a listing or e.g. in GUI menus. A negative precedence indicates
         a parameter that should be hidden in such listings.
 
-        instantiate: controls whether the value of this Parameter will
+        deepcopy: controls whether the value of this Parameter will
         be deepcopied when a Parameterized object is instantiated (if
         True), or if the single default value will be shared by all
         Parameterized instances (if False). For an immutable Parameter
-        value, it is best to leave instantiate at the default of
+        value, it is best to leave deep_copy at the default of
         False, so that a user can choose to change the value at the
         Parameterized instance level (affecting only that instance) or
         at the Parameterized class or superclass level (affecting all
@@ -1013,11 +950,11 @@ class Parameter(object):
         if you want all instances to share the same value state, e.g. if
         they are each simply referring to a single global object like
         a singleton. If instead each Parameterized should have its own
-        independently mutable value, instantiate should be set to
+        independently mutable value, deep_copy should be set to
         True, but note that there is then no simple way to change the
         value of this Parameter at the class or superclass level,
         because each instance, once created, will then have an
-        independently instantiated value.
+        independently deepcopied value.
 
         constant: if true, the Parameter value can be changed only at
         the class level or in a Parameterized constructor call. The
@@ -1041,7 +978,7 @@ class Parameter(object):
         created for every Parameterized instance. True by default.
         If False, all instances of a Parameterized class will share
         the same Parameter object, including all validation
-        attributes (bounds, etc.). See also instantiate, which is
+        attributes (bounds, etc.). See also deep_copy, which is
         conceptually similar but affects the Parameter value rather
         than the Parameter object.
 
@@ -1068,7 +1005,7 @@ class Parameter(object):
         self.readonly = readonly
         self._label = label
         self._internal_name = name
-        self._set_instantiate(instantiate)
+        self._set_deep_copy(deep_copy)
         self.pickle_default_value = pickle_default_value
         self.allow_None = (default is None or allow_None)
         self.watchers = {}
@@ -1121,15 +1058,15 @@ class Parameter(object):
     def label(self, val):
         self._label = val
 
-    def _set_instantiate(self,instantiate):
-        """Constant parameters must be instantiated."""
+    def _set_deep_copy(self,deep_copy):
+        """Constant parameters must be deep_copied."""
         # instantiate doesn't actually matter for read-only
         # parameters, since they can't be set even on a class.  But
         # having this code avoids needless instantiation.
         if self.readonly:
-            self.instantiate = False
+            self.deep_copy = False
         else:
-            self.instantiate = instantiate or self.constant # pylint: disable-msg=W0201
+            self.deep_copy = deep_copy or self.constant # pylint: disable-msg=W0201
 
     def __setattr__(self, attribute, value):
         if attribute == 'name' and getattr(self, 'name', None) and value != self.name:
@@ -1664,17 +1601,17 @@ class Parameters(object):
         ## Deepcopy all 'instantiate=True' parameters
         # (building a set of names first to avoid redundantly
         # instantiating a later-overridden parent class's parameter)
-        params_to_instantiate = {}
+        param_values_to_deep_copy = {}
         for class_ in classlist(type(self)):
             if not issubclass(class_, Parameterized):
                 continue
             for (k, v) in class_.param._parameters.items():
                 # (avoid replacing name with the default of None)
-                if v.instantiate and k != "name":
-                    params_to_instantiate[k] = v
+                if v.deep_copy and k != "name":
+                    param_values_to_deep_copy[k] = v
 
-        for p in params_to_instantiate.values():
-            self.param._instantiate_param(p)
+        for p in param_values_to_deep_copy.values():
+            self.param._deep_copy_param(p)
 
         ## keyword arg setting
         for name, val in params.items():
@@ -1715,7 +1652,7 @@ class Parameters(object):
         return not Comparator.is_equal(event.old, event.new)
 
 
-    def _instantiate_param(self_, param_obj, dict_=None, key=None):
+    def _deep_copy_param(self_, param_obj, dict_=None, key=None):
         # deepcopy param_obj.default into self.__dict__ (or dict_ if supplied)
         # under the parameter's _internal_name (or key if supplied)
         self = self_.self
@@ -2545,8 +2482,8 @@ class Parameters(object):
         Return {parameter_name:parameter.default} for all non-constant
         Parameters.
 
-        Note that a Parameter for which instantiate==True has its default
-        instantiated.
+        Note that a Parameter for which deep_copy==True has its default
+        deepcopied.
         """
         self = self_.self
         d = {}
@@ -2673,14 +2610,10 @@ class ParameterizedMetaclass(type):
     attribute __abstract set to True. The 'abstract' attribute can be
     used to find out if a class is abstract or not.
     """
-    def __init__(mcs, name, bases, dict_):
+    def __init__(mcs, name : str, bases : Tuple[Union[type, object]], dict_ : dict) -> None:
         """
         Initialize the class object (not an instance of the class, but
         the class itself).
-
-        Initializes all the Parameters by looking up appropriate
-        default values (see __param_inheritance()) and setting
-        attrib_names (see _set_names()).
         """
         type.__init__(mcs, name, bases, dict_)
 
@@ -2739,9 +2672,9 @@ class ParameterizedMetaclass(type):
         mcs.param._depends = {'watch': _inherited+_watch}
 
         if docstring_signature:
-            mcs.__class_docstring_signature()
+            mcs.__update_docstring_signature()
 
-    def __class_docstring_signature(mcs, max_repr_len : int = 15):
+    def __update_docstring_signature(mcs) -> None:
         """
         Autogenerate a keyword signature in the class docstring for
         all available parameters. This is particularly useful in the
@@ -2817,9 +2750,12 @@ class ParameterizedMetaclass(type):
         """
         # Find out if there's a Parameter called attribute_name as a
         # class attribute of this class - if not, parameter is None.
-        parameter, owning_class = mcs.get_param_descriptor(attribute_name)
+        parameter, = mcs.get_param_descriptor(attribute_name)
 
-        if parameter: # and not isinstance(value, Parameter): will not work for ClassSelector and besides value is anyway checked 
+        # checking isinstance(value, Parameter) will not work for ClassSelector 
+        # and besides value is anyway validated. On the downside, this does not allow
+        # altering of parameters instances if class already of the parameter with attribute_name
+        if parameter: # and not isinstance(value, Parameter): 
             # if owning_class != mcs:
             #     parameter = copy.copy(parameter)
             #     parameter.owner = mcs
@@ -3142,19 +3078,17 @@ class Parameterized(metaclass=ParameterizedMetaclass):
         Save the object's state: return a dictionary that is a shallow
         copy of the object's __dict__ and that also includes the
         object's __slots__ (if it has any).
+        
+        Note that Parameterized object pickling assumes that
+        attributes to be saved are only in __dict__ or __slots__
+        (the standard Python places to store attributes, so that's a
+        reasonable assumption). (Additionally, class attributes that
+        are Parameters are also handled, even when they haven't been
+        instantiated - see PickleableClassAttributes.)
         """
-        # Unclear why this is a copy and not simply state.update(self.__dict__)
         state = self.__dict__.copy()
         for slot in get_occupied_slots(self):
             state[slot] = getattr(self,slot)
-
-        # Note that Parameterized object pickling assumes that
-        # attributes to be saved are only in __dict__ or __slots__
-        # (the standard Python places to store attributes, so that's a
-        # reasonable assumption). (Additionally, class attributes that
-        # are Parameters are also handled, even when they haven't been
-        # instantiated - see PickleableClassAttributes.)
-
         return state
 
     def __setstate__(self, state):
@@ -3214,7 +3148,7 @@ class Parameterized(metaclass=ParameterizedMetaclass):
 
     def __str__(self):
         """Return a short representation of the name and class of this object."""
-        return "<%s %s>" % (self.__class__.__name__,self.name)
+        return "<%s %s>" % (self.__class__.__name__, self.name)
 
 
     # PARAM2_DEPRECATION: Remove this compatibility alias for param 2.0 and later; use self.param.pprint instead
