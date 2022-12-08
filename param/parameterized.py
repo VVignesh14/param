@@ -16,25 +16,14 @@ import inspect
 import random
 import numbers
 import operator
-from typing import Any, Callable, Dict, Tuple, Union
-
-# Allow this file to be used standalone if desired, albeit without JSON serialization
-try:
-    from . import serializer
-except ImportError:
-    serializer = None
-
-
+from typing import Any, Callable, Dict, Optional, Tuple, Type, Union
+from types import FunctionType, TracebackType
 from collections import defaultdict, namedtuple, OrderedDict
 from functools import partial, wraps, reduce
-from operator import itemgetter,attrgetter
-from types import FunctionType
-
-import logging
+from operator import itemgetter, attrgetter
 from contextlib import contextmanager
-from logging import DEBUG, INFO, WARNING, ERROR, CRITICAL
-
-from .utils import wrap_error_text
+from logging import DEBUG, INFO, WARNING
+from inspect import getfullargspec
 
 try:
     # In case the optional ipython module is unavailable
@@ -42,11 +31,6 @@ try:
     param_pager = ParamPager(metaclass=True)  # Generates param description
 except:
     param_pager = None
-
-try:
-    from inspect import getfullargspec
-except:
-    from inspect import getargspec as getfullargspec # python2
 
 dt_types = (dt.datetime, dt.date)
 
@@ -56,34 +40,22 @@ try:
 except:
     pass
 
+# Allow this file to be used standalone if desired, albeit without JSON serialization
+try:
+    from . import serializer
+except ImportError:
+    serializer = None
+
+from .utils import *
+
 basestring = basestring if sys.version_info[0]==2 else str # noqa: it is defined
 
-VERBOSE = INFO - 1
-logging.addLevelName(VERBOSE, "VERBOSE")
 
 # Get the appropriate logging.Logger instance. If `logger` is None, a
 # logger named `"param"` will be instantiated. If `name` is set, a descendant
 # logger with the name ``"param.<name>"`` is returned (or
 # ``logger.name + ".<name>"``)
 logger = None
-def get_logger(name=None):
-    if logger is None:
-        root_logger = logging.getLogger('param')
-        if not root_logger.handlers:
-            root_logger.setLevel(logging.INFO)
-            formatter = logging.Formatter(
-                fmt='%(levelname)s:%(name)s: %(message)s')
-            handler = logging.StreamHandler()
-            handler.setFormatter(formatter)
-            root_logger.addHandler(handler)
-    else:
-        root_logger = logger
-    if name is None:
-        return root_logger
-    else:
-        return logging.getLogger(root_logger.name + '.' + name)
-
-
 # Indicates whether warnings should be raised as errors, stopping
 # processing.
 warnings_as_exceptions = False
@@ -99,27 +71,6 @@ class _Undefined:
     Dummy value to signal completely undefined values rather than
     simple None values.
     """
-
-@contextmanager
-def logging_level(level):
-    """
-    Temporarily modify param's logging level.
-    """
-    level = level.upper()
-    levels = [DEBUG, INFO, WARNING, ERROR, CRITICAL, VERBOSE]
-    level_names = ['DEBUG', 'INFO', 'WARNING', 'ERROR', 'CRITICAL', 'VERBOSE']
-
-    if level not in level_names:
-        raise Exception("Level %r not in %r" % (level, levels))
-
-    param_logger = get_logger()
-    logging_level = param_logger.getEffectiveLevel()
-    param_logger.setLevel(levels[level_names.index(level)])
-    try:
-        yield None
-    finally:
-        param_logger.setLevel(logging_level)
-
 
 @contextmanager
 def _batch_call_watchers(parameterized, enable=True, run=True):
@@ -340,18 +291,18 @@ def iscoroutinefunction(function):
         return False
 
 
-def instance_descriptor(f):
+def instance_descriptor(set : Callable[[Any, Any, Any],None]) -> Callable[[Any, Any, Any],None]:
     # If parameter has an instance Parameter, delegate setting
-    def _f(self, obj, val):
+    def _set(self, obj, val):
         instance_param = getattr(obj, '_instance__params', {}).get(self.name)
         if instance_param is not None and self is not instance_param:
             instance_param.__set__(obj, val)
             return
-        return f(self, obj, val)
-    return _f
+        set(self, obj, val)
+    return _set
 
 
-def get_method_owner(method):
+def get_method_owner(method : Callable) -> Any:
     """
     Gets the instance that owns the supplied method
     """
@@ -780,7 +731,7 @@ class ParameterMetaclass(type):
     """
     Metaclass allowing control over creation of Parameter classes.
     """
-    def __new__(mcs,classname,bases,classdict):
+    def __new__(mcs, classname : str, bases : Tuple[Any], classdict : Dict) -> 'ParameterMetaclass':
 
         # store the class's docstring in __classdoc
         if '__doc__' in classdict:
@@ -797,16 +748,16 @@ class ParameterMetaclass(type):
             classdict['__slots__']=[]
 
         # No special handling for a __dict__ slot; should there be?
+        return type.__new__(mcs, classname, bases, classdict)
 
-        return type.__new__(mcs,classname,bases,classdict)
-
-    def __getattribute__(mcs,name):
+    def __getattribute__(mcs, name : str) -> Any:
         if name=='__doc__':
             # when asking for help on Parameter *class*, return the
             # stored class docstring
             return type.__getattribute__(mcs,'__classdoc')
         else:
             return type.__getattribute__(mcs,name)
+
 
 
 class Parameter(metaclass=ParameterMetaclass):
@@ -904,10 +855,10 @@ class Parameter(metaclass=ParameterMetaclass):
     # overhead, Parameters are implemented using __slots__ (see
     # http://www.python.org/doc/2.4/ref/slots.html). 
 
-    __slots__ = ['name', '_internal_name', 'default', 'doc',
+    __slots__ = ['owner', 'name', '_internal_name', 'default', 'doc',
                  'precedence', '_deep_copy', 'constant', 'readonly',
                  'pickle_default_value', 'allow_None', 'per_instance',
-                 'watchers', '_label']
+                 'watchers', '_label', 'class_member']
 
     # Note: When initially created, a Parameter does not know which
     # Parameterized class owns it. Once the owning Parameterized
@@ -916,10 +867,10 @@ class Parameter(metaclass=ParameterMetaclass):
 
     _serializers = {'json': serializer.JSONSerialization}
 
-    def __init__(self, default : Any = None, doc : str = None, label : str = None, 
-                 deep_copy : bool = False, constant : bool = False, readonly : bool = False,
-                 pickle_default_value : bool = True, allow_None : bool = False,
-                 per_instance : bool = True, precedence : float = None):  # pylint: disable-msg=R0913
+    def __init__(self, default : Any = None, doc : str = None,
+                 constant : bool = False, readonly : bool = False, allow_None : bool = False,
+                 label : str = None,  per_instance : bool = True, deep_copy : bool = False, 
+                 class_member : bool = False, pickle_default_value : bool = True, precedence : float = None):  # pylint: disable-msg=R0913
 
         """Initialize a new Parameter object and store the supplied attributes:
 
@@ -941,14 +892,6 @@ class Parameter(metaclass=ParameterMetaclass):
         _user_ should never change but which do change during code
         execution.
 
-        per_instance: whether a separate Parameter instance will be
-        created for every Parameterized instance. True by default.
-        If False, all instances of a Parameterized class will share
-        the same Parameter object, including all validation
-        attributes (bounds, etc.). See also deep_copy, which is
-        conceptually similar but affects the Parameter value rather
-        than the Parameter object.
-
         allow_None: if True, None is accepted as a valid value for
         this Parameter, in addition to any other values that are
         allowed. If the default value is defined as None, allow_None
@@ -957,6 +900,14 @@ class Parameter(metaclass=ParameterMetaclass):
         label: optional text label to be used when this Parameter is
         shown in a listing. If no label is supplied, the attribute name
         for this parameter in the owning Parameterized object is used.
+
+        per_instance: whether a separate Parameter instance will be
+        created for every Parameterized instance. True by default.
+        If False, all instances of a Parameterized class will share
+        the same Parameter object, including all validation
+        attributes (bounds, etc.). See also deep_copy, which is
+        conceptually similar but affects the Parameter value rather
+        than the Parameter object.
 
         deep_copy: controls whether the value of this Parameter will
         be deepcopied when a Parameterized object is instantiated (if
@@ -977,6 +928,8 @@ class Parameter(metaclass=ParameterMetaclass):
         because each instance, once created, will then have an
         independently deepcopied value.
 
+        class_member : To make a ... 
+
         pickle_default_value: whether the default value should be
         pickled. Usually, you would want the default value to be pickled,
         but there are rare cases where that would not be the case (e.g.
@@ -991,21 +944,21 @@ class Parameter(metaclass=ParameterMetaclass):
         inheritance of Parameter slots (attributes) from the owning-class'
         class hierarchy (see ParameterizedMetaclass).
         """
-
-        setattr(self, 'owner', None)
+        self.owner = None
         self.name = None
-        self.precedence = precedence
+        self._internal_name = None
         self.default = default
         self.doc = doc
-        self.constant = constant or readonly # readonly => constant
+        self.constant = constant # readonly is constant however readonly is dealt separately
         self.readonly = readonly
-        self._label = label
-        self._internal_name = None
-        self.deep_copy = deep_copy
-        self.pickle_default_value = pickle_default_value
         self.allow_None = (default is None or allow_None)
-        self.watchers = {}
+        self._label = label
         self.per_instance = per_instance
+        self.deep_copy = deep_copy
+        self.class_member = class_member
+        self.pickle_default_value = pickle_default_value
+        self.precedence = precedence
+        self.watchers = {}
 
     def __set_name__(self, owner : Union['Parameterized', Any], attrib_name : str) -> None:
         if self.name is not None:
@@ -1023,6 +976,15 @@ class Parameter(metaclass=ParameterMetaclass):
                                     owner_name, attrib_name))
         self.name = attrib_name
         self._internal_name = "_%s_param_value" % attrib_name
+        self.__post_owner_init()
+
+    def __post_owner_init(self):
+        self.__validate_slots()
+        self.validate(self.default)
+
+    def __validate_slots(self):
+        if self.constant and self.allow_None:
+            raise ValueError('constant values cannot be allowed to be None.')
         
     @classmethod
     def serialize(cls, value : Any) -> Any:
@@ -1070,7 +1032,7 @@ class Parameter(metaclass=ParameterMetaclass):
             self._deep_copy = deep_copy or self.constant # pylint: disable-msg=W0201
 
     def __setattr__(self, attribute : str, value : Any) -> None:
-        if attribute == 'name' and getattr(self, 'name', None):
+        if attribute == 'name' or getattr(self, 'name', None) and value != self.name:
             raise AttributeError("Parameter name cannot be modified after "
                                  "it has been bound to a Parameterized.")
 
@@ -1078,19 +1040,20 @@ class Parameter(metaclass=ParameterMetaclass):
         slot_attribute = attribute in self.__slots__
         try:
             old = getattr(self, attribute) if watched else not watched
-            if slot_attribute:
-                self._on_set(attribute, old, value)
-        except AttributeError as e:
+        except AttributeError as exc:
             if slot_attribute:
                 # If Parameter slot is defined but an AttributeError was raised
                 # we are in __setstate__ and watchers should not be triggered
                 old = not watched
             else:
-                raise e
+                raise exc
 
         super(Parameter, self).__setattr__(attribute, value)
 
-        if old is not watched:
+        if slot_attribute:
+            self._on_slot_set(attribute, old, value)
+
+        if old is not watched or not isinstance(self.owner, Parameterized):
             return
 
         event = Event(what=attribute, name=self.name, obj=None, cls=self.owner,
@@ -1100,7 +1063,7 @@ class Parameter(metaclass=ParameterMetaclass):
         if not self.owner.param._BATCH_WATCH:
             self.owner.param._batch_call_watchers()
 
-    def _on_set(self, attribute : str, old : Any, value : Any) -> None:
+    def _on_slot_set(self, attribute : str, old : Any, value : Any) -> None:
         """
         Can be overridden on subclasses to handle changes when parameter
         attribute is set.
@@ -1117,12 +1080,8 @@ class Parameter(metaclass=ParameterMetaclass):
         If called for a Parameterized instance, produce that
         instance's value, if one has been set - otherwise produce the
         class's value (default).
-        """
-        if obj is None: # e.g. when __get__ called for a Parameterized class
-            result = self.default
-        else:
-            result = obj.__dict__.get(self._internal_name,self.default)
-        return result
+        """        
+        return obj.__dict__.get(self._internal_name, self.default)
 
     @instance_descriptor
     def __set__(self, obj : Union['Parameterized', Any], val : Any) -> None:
@@ -1152,25 +1111,28 @@ class Parameter(metaclass=ParameterMetaclass):
         """
         if self.readonly:
             raise TypeError("Read-only parameter '%s' cannot be set/modified" % self.name)
-    
+        
         self.validate(val)
 
+        owner = obj if not self.class_member else self.owner
+
         _old = NotImplemented
-        # obj can be None if __set__ is called for a Parameterized class
         if self.constant:
-            if obj.__dict__.get(self._internal_name, NotImplemented) is NotImplemented:
-                obj.__dict__[self._internal_name] = val
+            if self.default is None and owner.__dict__.get(self._internal_name, None) is None: 
+                _old = None
             else:
-                _old = obj.__dict__.get(self._internal_name, self.default)
+                _old = owner.__dict__.get(self._internal_name, self.default)
                 if val is not _old:
                     raise TypeError("Constant parameter '%s' cannot be modified"%self.name)
         else:
-            _old = obj.__dict__.get(self._internal_name, self.default)
-            obj.__dict__[self._internal_name] = val
+            _old = owner.__dict__.get(self._internal_name, self.default)
 
-        self._post_setter(obj, val) 
+        # obj can be None if __set__ is called for a Parameterized class
+        owner.__dict__[self._internal_name] = val
+        
+        self._post_setter(owner, val) 
 
-        if not isinstance(obj, Parameterized):
+        if not isinstance(owner, (Parameterized, ParameterizedMetaclass)) or issubclass(owner, (Parameterized, ParameterizedMetaclass)):
             """
             dont deal with events, watchers etc when object
             is not a Parameterized class child
@@ -1207,7 +1169,6 @@ class Parameter(metaclass=ParameterMetaclass):
 
     def _validate_value(self, value : Any, allow_None : bool) -> None:
         """Implements validation for parameter value"""
-        return True 
 
     def adapt(self, val : Any) -> Any:
         """
@@ -1221,7 +1182,11 @@ class Parameter(metaclass=ParameterMetaclass):
         val = self.adapt(val)
         self._validate_value(val, self.allow_None)
 
-    def _post_setter(self, obj : Union['Parameterized', Any], val : Any) -> None:
+    @property 
+    def validator(self) -> FunctionType:
+        return partial(self.validate, self=self)
+
+    def _post_setter(self, owner : Union['Parameterized', Any], val : Any) -> None:
         """Called after the parameter value has been validated and set"""
 
     def __delete__(self, obj : Union['Parameterized', Any]):
@@ -1257,9 +1222,10 @@ class Parameter(metaclass=ParameterMetaclass):
             setattr(self,k,v)
 
 
+
 # Define one particular type of Parameter that is used in this file
 class String(Parameter):
-    r"""
+    """
     A String Parameter, with a default value and optional regular expression (regex) matching.
 
     Example of using a regex to implement IPv4 address matching::
@@ -1275,11 +1241,9 @@ class String(Parameter):
     __slots__ = ['regex']
 
     def __init__(self, default="", regex=None, allow_None=False, **kwargs):
-        super(String, self).__init__(default=default, allow_None=allow_None, **kwargs)
         self.regex = regex
-        self.allow_None = (default is None or allow_None)
-        self._validate(default)
-
+        super(String, self).__init__(default=default, allow_None=allow_None, **kwargs)
+    
     def _validate_regex(self, val, regex):
         if (val is None and self.allow_None):
             return
@@ -1299,7 +1263,7 @@ class String(Parameter):
             raise ValueError("String parameter %r only takes a string value, "
                              "not value of type %s." % (self.name, type(val)))
 
-    def _validate(self, val):
+    def validate(self, val):
         self._validate_value(val, self.allow_None)
         self._validate_regex(val, self.regex)
 
@@ -1314,13 +1278,14 @@ class shared_parameters(object):
     objects at once and can provide a significant speedup.
     """
 
-    _share = False
-    _shared_cache = {}
+    _share : bool = False
+    _shared_cache : Dict[str, Any] = {}
 
     def __enter__(self):
         shared_parameters._share = True
 
-    def __exit__(self, exc_type, exc_val, exc_tb):
+    def __exit__(self, exc_type : Optional[Type[BaseException]], exc_val : Optional[Type[BaseException]],
+                         exc_tb : Optional[Type[TracebackType]]) -> bool:
         shared_parameters._share = False
         shared_parameters._shared_cache = {}
 
@@ -1370,7 +1335,7 @@ class Comparator(object):
     equalities.update({dtt: operator.eq for dtt in dt_types})
 
     @classmethod
-    def is_equal(cls, obj1, obj2):
+    def is_equal(cls, obj1 : Any, obj2 : Any) -> bool:
         for eq_type, eq in cls.equalities.items():
             if ((isinstance(eq_type, FunctionType)
                  and eq_type(obj1) and eq_type(obj2))
@@ -1383,7 +1348,7 @@ class Comparator(object):
         return False
 
     @classmethod
-    def compare_iterator(cls, obj1, obj2):
+    def compare_iterator(cls, obj1 : Any, obj2 : Any) -> bool:
         if type(obj1) != type(obj2) or len(obj1) != len(obj2):
             return False
         for o1, o2 in zip(obj1, obj2):
@@ -1392,7 +1357,7 @@ class Comparator(object):
         return True
 
     @classmethod
-    def compare_mapping(cls, obj1, obj2):
+    def compare_mapping(cls, obj1 : Any, obj2 : Any) -> bool:
         if type(obj1) != type(obj2) or len(obj1) != len(obj2): return False
         for k in obj1:
             if k in obj2:
@@ -1593,28 +1558,6 @@ class Parameters(object):
                 self.param.warning("Setting non-parameter attribute %s=%s using a mechanism intended only for parameters", name, val)
             # i.e. if not desc it's setting an attribute in __dict__, not a Parameter
             setattr(self, name, val)
-
-    # PARAM2_DEPRECATION: Backwards compatibilitity for param<1.12
-    @classmethod
-    def deprecate(cls, fn):
-        """
-        Decorator to issue warnings for API moving onto the param
-        namespace and to add a docstring directing people to the
-        appropriate method.
-        """
-        def inner(*args, **kwargs):
-            if cls._disable_stubs:
-                raise AssertionError('Stubs supporting old API disabled')
-            elif cls._disable_stubs is None:
-                pass
-            elif cls._disable_stubs is False:
-                get_logger(name=args[0].__class__.__name__).log(
-                    WARNING, 'Use method %r via param namespace ' % fn.__name__)
-            return fn(*args, **kwargs)
-
-        inner.__doc__= "Inspect .param.%s method for the full docstring"  % fn.__name__
-        return inner
-
 
     @classmethod
     def _changed(cls, event):
@@ -2675,7 +2618,6 @@ class ParameterizedMetaclass(type):
 
     def _initialize_parameter(mcs, param_name : str, param : Parameter) -> None:
         setattr(param, 'owner', mcs)
-        
 
     # Should use the official Python 2.6+ abstract base classes; see
     # https://github.com/holoviz/param/issues/84
@@ -2964,12 +2906,6 @@ else:
             return user_function
         return decorating_function
 
-def count():
-    i = 0 
-    while True:
-        yield i+1
-        i += 1
-gen_count = count()
 
 class Parameterized(metaclass=ParameterizedMetaclass):
     """
@@ -3497,53 +3433,5 @@ class default_label_formatter(ParameterizedFunction):
 
 
 label_formatter = default_label_formatter
-
-
-# PARAM2_DEPRECATION: Should be able to remove this; was originally
-# adapted from OProperty from
-# infinitesque.net/articles/2005/enhancing%20Python's%20property.xhtml
-# but since python 2.6 the getter, setter, and deleter attributes of
-# a property should provide similar functionality already.
-class overridable_property(object):
-    """
-    The same as Python's "property" attribute, but allows the accessor
-    methods to be overridden in subclasses.
-    """
-    # Delays looking up the accessors until they're needed, rather
-    # than finding them when the class is first created.
-
-    # Based on the emulation of PyProperty_Type() in Objects/descrobject.c
-
-    def __init__(self, fget=None, fset=None, fdel=None, doc=None):
-        self.fget = fget
-        self.fset = fset
-        self.fdel = fdel
-        self.__doc__ = doc
-
-    def __get__(self, obj, objtype=None):
-        if obj is None:
-            return self
-        if self.fget is None:
-            raise AttributeError("unreadable attribute")
-        if self.fget.__name__ == '<lambda>' or not self.fget.__name__:
-            return self.fget(obj)
-        else:
-            return getattr(obj, self.fget.__name__)()
-
-    def __set__(self, obj, value):
-        if self.fset is None:
-            raise AttributeError("can't set attribute")
-        if self.fset.__name__ == '<lambda>' or not self.fset.__name__:
-            self.fset(obj, value)
-        else:
-            getattr(obj, self.fset.__name__)(value)
-
-    def __delete__(self, obj):
-        if self.fdel is None:
-            raise AttributeError("can't delete attribute")
-        if self.fdel.__name__ == '<lambda>' or not self.fdel.__name__:
-            self.fdel(obj)
-        else:
-            getattr(obj, self.fdel.__name__)()
 
 
