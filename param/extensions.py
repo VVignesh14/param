@@ -1,8 +1,19 @@
 from collections.abc import MutableSequence, MutableMapping
 from typing import List, Any, Dict
 from copy import deepcopy
+from sys import maxsize
 
 from .utils import wrap_error_text
+
+
+def get_bounds(bounds : tuple) -> tuple:
+    if bounds[0] is None and bounds[1] is None:
+        bounds = (0, 2*maxsize + 1)
+    elif bounds[0] is None: 
+        bounds = (0, bounds[1])
+    elif bounds[1] is None:
+        bounds = (bounds[0], 2*maxsize + 1)
+    return bounds
 
 
 class AbstractConstrainedList(MutableSequence):
@@ -10,11 +21,10 @@ class AbstractConstrainedList(MutableSequence):
     # Need to check mul
     
     def __init__(self, default : List[Any] = [], constant : bool = False, bounds : tuple = (0, None), 
-                        allow_None : bool = True, set_direct : bool = False, skip_validate : bool = False) -> None:
+                       set_direct : bool = False, skip_validate : bool = False) -> None:
         super().__init__()
-        self.allow_None = allow_None
         self.constant   = constant
-        self.bounds     = bounds
+        self.bounds     = get_bounds(bounds)
         self._validate(default, False, skip_validate)    
         self._initialize_set(default, set_direct)
         
@@ -31,8 +41,6 @@ class AbstractConstrainedList(MutableSequence):
     def _validate(self, value : Any, for_extending : bool = False, skip_validate : bool = False) -> None:
         if skip_validate:
             return
-        if value is None and self.allow_None: 
-            return
         if self.constant:
             raise ValueError("List {} is a constant, cannot be modified.".format(self.__repr__()))
         self._validate_bounds(value, for_extending)
@@ -44,7 +52,7 @@ class AbstractConstrainedList(MutableSequence):
             raise TypeError("Given value is not a list") 
            
     def _validate_item(self, value : Any) -> None:
-        raise NotImplementedError("Please implement this function in the child of AbstractContrainedList.")
+        raise NotImplementedError("Please implement this function in the child of AbstractConstrainedList.")
 
     def _validate_bounds(self, value : Any, for_extending : bool = False) -> None:
         if for_extending:
@@ -125,7 +133,7 @@ class AbstractConstrainedList(MutableSequence):
         return self._inner.__add__(__x)
 
     def __iadd__(self, values : List[Any] ) -> List[Any]:
-        raise NotImplementedError("Please implement this function in the child of ContrainedList.")
+        raise NotImplementedError("Please implement this function in the child of ConstrainedList.")
 
     def insert(self, __index : int, __object : Any) -> None:
         self._validate([__object], for_extending=True)
@@ -164,17 +172,17 @@ class AbstractConstrainedList(MutableSequence):
         self._inner.sort(key, reverse)
 
     def copy(self, return_as_typed_dict : bool = False):
-        raise NotImplementedError("Please implement this function in the child of ContrainedList.")
+        raise NotImplementedError("Please implement this function in the child of ConstrainedList.")
 
 
        
 class TypeConstrainedList(AbstractConstrainedList):
 
     def __init__(self, default : List[Any] = [], item_type : Any = None, bounds : tuple = (0,None), 
-                       constant : bool = False, allow_None : bool = True, set_direct : bool = False, 
+                       constant : bool = False, set_direct : bool = False, 
                        skip_validate : bool = False) -> None:
         self.item_type = item_type
-        super().__init__(default, constant, bounds, allow_None)
+        super().__init__(default, constant, bounds, skip_validate)
         
     def _validate_item(self, value : Any):
         if self.item_type is not None:
@@ -183,19 +191,19 @@ class TypeConstrainedList(AbstractConstrainedList):
                     raise TypeError(
                         wrap_error_text(
                             """
-                            Not all elements givenare of allowed item type(s), which are : {}. 
+                            Not all elements given are of allowed item type(s), which are : {}. 
                             Given type {}.""".format(self.item_type, type(val))
                     ))
       
     def __iadd__(self, value : List[Any]):
         self._validate(value)
         return TypeConstrainedList(self._inner.__iadd__(value), self.item_type, self.bounds,
-                                    self.constant, self.allow_None, True, True)
+                                    self.constant, True, True)
     
     def copy(self, return_as_typed_dict : bool = False) -> List[Any]: 
         if return_as_typed_dict:
             return TypeConstrainedList(self._inner.copy(), self.item_type, self.bounds, self.constant, 
-                                                    self.allow_None, True, True)
+                                                    True, True)
         else:
             return self._inner.copy()
       
@@ -205,39 +213,41 @@ class TypeConstrainedDict(MutableMapping):
     """ A dictionary which contains only ``NewDict`` values. """
 
     def __init__(self, default : Dict[Any, Any] = {}, key_type : tuple = None, item_type : tuple = None, 
-                        bounds : tuple = (0, None), constant : bool = False, allow_None : bool = True, 
-                        set_direct : bool = False):
+                        bounds : tuple = (0, None), constant : bool = False, set_direct : bool = False):
         super().__init__()
         # _inner value set in update()
         self._inner = None # or collections.OrderedDict, etc.
         self.key_type   = key_type
         self.item_type  = item_type
-        self.allow_None = allow_None
-        self.bounds     = bounds 
+        self.bounds     = get_bounds(bounds)
         self.constant   = constant 
         self._validate(default)
         self._initialize_set(default, set_direct)
 
+    def _initialize_set(self, __o : Any, set_direct : bool = False) -> None:
+        if set_direct:
+            self._inner = __o
+        else:
+            self._inner = deepcopy(__o)
+
     def _validate(self, value : Dict[Any, Any]) -> None:
-        if self.allow_None and value is None:
-            return 
-        if self.constant:
-            raise ValueError("")
+        if self.constant and self._inner is not None:
+            raise ValueError("TypeConstrainedDict is constant and cannot be modified.")
         self._validate_value(value)
         self._validate_bounds(value)
         self._validate_item(value)
 
     def _validate_value(self, value) -> None:
         if not isinstance(value, dict):
-            raise TypeError("")
+            raise TypeError("Given value is not of type dict. Given type : {}".format(type(value)))
 
     def _validate_bounds(self, value : Dict[Any, Any], for_updating : bool = False) -> None:
         if for_updating:
-            if not (self.bounds[0] < self._inner.__len__() + value.__len__() < self.bounds[1]):
-                raise ValueError("")
+            if not (self.bounds[0] <= self._inner.__len__() + value.__len__() <= self.bounds[1]):
+                raise ValueError("given dictionary length outside bounds.")
         else:
-            if not (self.bounds[0] < value.__len__() < self.bounds[1]):
-                raise ValueError("")
+            if not (self.bounds[0] <= value.__len__() <= self.bounds[1]):
+                raise ValueError("given dictionary length outside bounds.")
             
     def _validate_item(self, value : Dict[Any, Any]) -> None:
         keys = value.keys()
@@ -316,7 +326,7 @@ class TypeConstrainedDict(MutableMapping):
     def values(self):
         return self._inner.values()
 
-    def get(self, __key : Any, __default : Any):
+    def get(self, __key : Any, __default : Any = None):
         return self._inner.get(__key, __default)
 
     def setdefault(self, __key : Any) -> None:
@@ -327,7 +337,8 @@ class TypeConstrainedDict(MutableMapping):
 
     def copy(self, return_as_typed_dict : bool = False) -> Dict[Any, Any]:
         if return_as_typed_dict:
-            pass 
+            type(self)(self._inner, self.key_type, self.item_type, self.bounds,
+                                    self.constant, True)
         else:
             return self._inner.copy()
 
@@ -337,12 +348,6 @@ class TypeConstrainedDict(MutableMapping):
     def pop(self, __key : Any) -> Any:
         return self._inner.pop(__key)
     
-    def _initialize_set(self, __o : Any, set_direct) -> None:
-        if set_direct:
-            self._inner = __o
-        else:
-            self._inner = deepcopy(__o)
-
     def update(self, __o : Any) -> None:
         if self._inner is None: 
             self._inner = dict()
@@ -350,5 +355,27 @@ class TypeConstrainedDict(MutableMapping):
         self._inner.update(__o)
         
 
+class TypedKeyMappingsDict(TypeConstrainedDict):
 
-__all__ = ['TypeConstrainedList', 'TypeConstrainedDict']
+    def __init__(self, default: Dict[Any, Any] = {}, key_item_mapping : Dict[Any, Any] = None, 
+                    allow_unspecified_keys : bool = True, bounds: tuple = (0, None), constant: bool = False, set_direct: bool = False):
+        self.key_item_mapping = key_item_mapping
+        self.allow_unspecified_keys = allow_unspecified_keys
+        self.key_list = self.key_item_mapping.keys() if allow_unspecified_keys else []
+        super().__init__(default, None, None, bounds, constant, set_direct)
+
+    def _validate_item(self, value: Dict[Any, Any]) -> None:
+        for key, val in value.items():
+            self._validate_key_value_pair(key, val)
+                
+    def _validate_key_value_pair(self, __key: Any, __value: Any) -> None:
+        if __key not in self.key_list:
+            if self.allow_unspecified_keys:
+                pass 
+            else: 
+                raise KeyError("Keys except {} not allowed".format(self.key_list))
+        elif (not isinstance(__value, self.key_item_mapping[__key])) and (not issubclass(__value, self.key_item_mapping[__key])):
+            raise TypeError()
+                
+
+__all__ = ['TypeConstrainedList', 'TypeConstrainedDict', 'TypedKeyMappingsDict']

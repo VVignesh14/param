@@ -36,6 +36,7 @@ from .parameterized import shared_parameters # noqa: api import
 from .parameterized import logging_level     # noqa: api import
 from .parameterized import DEBUG, VERBOSE, INFO, WARNING, ERROR, CRITICAL # noqa: api import
 from .extensions import *
+from .attribute import *
 
 from collections import OrderedDict
 from numbers import Real
@@ -2279,35 +2280,87 @@ def exceptions_summarized():
 
 class TypedList(ClassSelector):
     
-    def __init__(self, default : typing.List[typing.Any] = [], item_type : typing.Any = None, 
+    __slots__ = ['item_type', 'bounds']
+
+    def __init__(self, default : typing.Union[typing.List[typing.Any], None] = None, item_type : typing.Any = None, 
                             bounds : tuple = (0,None), **params):
-        default = TypeConstrainedList(default, item_type, bounds, params.get('constant', False), 
-                                    params.get("allow_None", default is None), False, False)        
+        if default is not None:
+            default = TypeConstrainedList(default, item_type, bounds, params.get('constant', False), 
+                                            False, False)        
+        self.item_type = item_type
+        self.bounds    = bounds
         super().__init__(class_=TypeConstrainedList, default=default, **params)
 
 
     def __set__(self, obj, val):
-        if isinstance(val, list):
-            container : TypeConstrainedList = self.__get__(obj, None)
-            container._validate(val)
-            container._initialize_set(val)
+        if val is not None:
+            container : typing.Union[TypeConstrainedList, None] = self.__get__(obj, None)
+            if container is not None:
+                container._validate(val)
+                container._initialize_set(val)
+            else:
+                container = TypeConstrainedList(val, self.item_type, self.bounds, self.constant, 
+                                                    False, False)      
+            return super().__set__(obj, container) # re-set it to trigger param related activities
         else:
-            raise TypeError("Given value is not of type list. Given type {}".format(type(val)))
-
+            return super().__set__(obj, val) # re-set it to trigger param related activities
+            
 
 class TypedDict(ClassSelector):
+
+    __slots__ = ['key_type', 'item_type', 'bounds']
     
     def __init__(self, default : typing.Dict[typing.Any, typing.Any] = {}, key_type : tuple = None, 
                         item_type : tuple = None, bounds : tuple = (0, None), **params):
-        default = TypeConstrainedDict(default, key_type, item_type, 
-                        bounds, params.get('constant', False), params.get("allow_None", default is None), False)
+        if default is not None:
+            default = TypeConstrainedDict(default, key_type, item_type, 
+                        bounds, params.get('constant', False), False)
+        self.key_type = key_type
+        self.item_type = item_type
+        self.bounds = bounds 
         super().__init__(class_=TypeConstrainedDict, default=default, **params)
 
 
     def __set__(self, obj, val):
-        if isinstance(val, list):
-            container : TypeConstrainedDict = self.__get__(obj, None)
-            container._validate(val)
-            container._initialize_set(val)
+        if val is not None:
+            container : typing.Union[TypeConstrainedDict, None] = self.__get__(obj, None)
+            if container is not None:
+                container._validate(val)
+                container._initialize_set(val)
+            else:
+                container = TypeConstrainedDict(val, self.key_type, self.item_type, self.bounds, self.constant, 
+                                                    False)      
+            return super().__set__(obj, container) # re-set it to trigger param related activities
         else:
-            raise TypeError("Given value is not of type dict. Given type {}".format(type(val)))
+            return super().__set__(obj, val) # re-set it to trigger param related activities
+     
+  
+
+class TypedValueDict(ClassSelector):
+
+    __slots__ = ['key_value_type', 'allow_unspecified_keys', 'bounds']
+    
+    def __init__(self, default : typing.Dict[typing.Any, typing.Any] = {}, key_value_mapping : tuple = None, 
+                        allow_unspecified_keys : bool = True, bounds : tuple = (0, None), **params):
+        if default is not None:
+            default = TypedKeyMappingsDict(default, key_value_mapping, allow_unspecified_keys,
+                        bounds, params.get('constant', False), False)
+        self.key_value_type = key_value_mapping
+        self.allow_unspecified_keys = allow_unspecified_keys
+        self.bounds = bounds 
+        super().__init__(class_=TypedKeyMappingsDict, default=default, **params)
+
+
+    def __set__(self, obj, val):
+        if val is not None:
+            container : typing.Union[TypedKeyMappingsDict, None] = self.__get__(obj, None)
+            if container is not None:
+                container._validate(val)
+                container._initialize_set(val)
+            else:
+                container = TypedKeyMappingsDict(val, self.key_value_type, self.allow_unspecified_keys,
+                                                 self.bounds, self.constant, False)      
+            return super().__set__(obj, container) # re-set it to trigger param related activities
+        else:
+            return super().__set__(obj, val) # re-set it to trigger param related activities
+     

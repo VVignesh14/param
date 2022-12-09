@@ -1,0 +1,3 @@
+How are constant parameters written values? 
+When are per_instance parameters deep copied?
+copying watchers to instance params and deepcopying before itself

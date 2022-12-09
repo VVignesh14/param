@@ -2,6 +2,7 @@ from typing import Callable, Any, Union
 from types import FunctionType
 import inspect
 
+
 class attribute(property):
 
     def __init__(self, 
@@ -13,7 +14,6 @@ class attribute(property):
         super().__init__(fget, fset, fdel, doc)
         self.fval = fval 
         
-
     def validator(self, fval : Union[Callable, None] = None) -> Union[Callable, None]:
         if fval is None:
             if self.fval is not None:
@@ -29,6 +29,7 @@ class attribute(property):
         fval.__len_signature__ = len_signature
         return type(self)(self.fget, self.fset, self.fdel, fval, self.__doc__)
 
+
     def __set__(self, __obj: Any, __value: Any) -> None:
         if self.fval is not None:
             if self.fval.__len_signature__ == 1:
@@ -38,3 +39,4 @@ class attribute(property):
         return super().__set__(__obj, __value)
 
 
+__all__ = ['attribute']
