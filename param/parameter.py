@@ -537,18 +537,6 @@ def get_all_slots(class_ : 'Parameter') -> List[Any]:
             all_slots+=c.__slots__
     return all_slots
 
-
-class RemoteParameter(Parameter):
-
-
-    def __init__(self, default: Any = None, doc: str = None, constant: bool = False, 
-                    readonly: bool = False, allow_None: bool = False, label: str = None, per_instance: bool = True, 
-                    deep_copy: bool = False, class_member: bool = False, 
-                    pickle_default_value: bool = True, precedence: float = None):
-        super().__init__(default, doc, constant, readonly, allow_None, label, per_instance, deep_copy, class_member, pickle_default_value, precedence)
-
-
-
 from .parameterized import Parameterized, ParameterizedMetaclass
 
 __all__ = ['Parameter', 'RemoteParameter', 'get_all_slots', 'get_occupied_slots', ]
