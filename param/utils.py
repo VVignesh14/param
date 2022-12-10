@@ -1,6 +1,8 @@
 import logging
 from contextlib import contextmanager
 from logging import DEBUG, INFO, WARNING, ERROR, CRITICAL, Logger
+from inspect import getmro 
+from typing import List
 import textwrap
 
 T = textwrap.TextWrapper(
@@ -61,4 +63,33 @@ def logging_level(level : int):
     finally:
         param_logger.setLevel(logging_level)
 
-__all__ = ['get_logger', 'logging_level', 'wrap_error_text']
+
+def classlist(class_ : type) -> List[type]:
+    """
+    Return a list of the class hierarchy above (and including) the given class.
+
+    Same as `inspect.getmro(class_)[::-1]`
+    """
+    return getmro(class_)[::-1]
+
+
+def descendents(class_ : type) -> List[type]:
+    """
+    Return a list of the class hierarchy below (and including) the given class.
+
+    The list is ordered from least- to most-specific.  Can be useful for
+    printing the contents of an entire class hierarchy.
+    """
+    assert isinstance(class_,type)
+    q = [class_]
+    out = []
+    while len(q):
+        x = q.pop(0)
+        out.insert(0,x)
+        for b in x.__subclasses__():
+            if b not in q and b not in out:
+                q.append(b)
+    return out[::-1]
+
+
+__all__ = ['get_logger', 'logging_level', 'wrap_error_text', 'classlist', 'descendents']

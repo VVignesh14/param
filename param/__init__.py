@@ -26,6 +26,8 @@ import datetime as dt
 import collections
 import typing
 
+from .parameter import Parameter 
+
 from .parameterized import (
     Parameterized, Parameter, String, ParameterizedFunction, ParamOverrides,
     descendents, get_logger, instance_descriptor, basestring, dt_types)
@@ -66,6 +68,52 @@ main=Parameterized(name="main")
 # A global random seed (integer or rational) available for controlling
 # the behaviour of Parameterized objects with random state.
 random_seed = 42
+
+
+
+# Define one particular type of Parameter that is used in this file
+class String(Parameter):
+    """
+    A String Parameter, with a default value and optional regular expression (regex) matching.
+
+    Example of using a regex to implement IPv4 address matching::
+
+      class IPAddress(String):
+        '''IPv4 address as a string (dotted decimal notation)'''
+       def __init__(self, default="0.0.0.0", allow_None=False, **kwargs):
+           ip_regex = r'^((25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.){3}(25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)$'
+           super(IPAddress, self).__init__(default=default, regex=ip_regex, **kwargs)
+
+    """
+
+    __slots__ = ['regex']
+
+    def __init__(self, default="", regex=None, allow_None=False, **kwargs):
+        self.regex = regex
+        super(String, self).__init__(default=default, allow_None=allow_None, **kwargs)
+    
+    def _validate_regex(self, val, regex):
+        if (val is None and self.allow_None):
+            return
+        if regex is not None:
+            match = re.match(regex, val) 
+            if match is None:
+                raise ValueError("String parameter %r value %r does not match regex %r."
+                             % (self.name, val, regex))
+            elif match.group(0) != val:
+                raise ValueError("String parameter %r value %r does not match regex %r."
+                             % (self.name, val, regex))
+            
+    def _validate_value(self, val, allow_None):
+        if allow_None and val is None:
+            return
+        if not isinstance(val, basestring):
+            raise ValueError("String parameter %r only takes a string value, "
+                             "not value of type %s." % (self.name, type(val)))
+
+    def validate(self, val):
+        self._validate_value(val, self.allow_None)
+        self._validate_regex(val, self.regex)
 
 
 def produce_value(value_obj):

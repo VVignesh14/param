@@ -61,7 +61,7 @@ class ParamPager(object):
         True, parameters are also collected from the super classes.
         """
 
-        params = dict(obj.param.objects('existing'))
+        params = dict(obj.parameters.objects(existing=True))
         if isinstance(obj,type):
             changed = []
             val_dict = dict((k,p.default) for (k,p) in params.items())
