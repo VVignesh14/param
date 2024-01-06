@@ -1,7 +1,6 @@
 import typing
 import numpy
 from types import FunctionType
-
 from .parameterized import Parameterized, ParameterizedMetaclass
 from .parameters import *
 

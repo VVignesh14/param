@@ -28,6 +28,7 @@ from .utils import *
 from .exceptions import *
 from .serializer import serializers
 
+
 try:
     # In case the optional ipython module is unavailable
     from .ipython import ParamPager
@@ -36,6 +37,7 @@ except:
     param_pager = None
 
 dt_types = (datetime.datetime, datetime.date)
+
 
 try:
     import numpy as np
@@ -65,7 +67,7 @@ def instance_descriptor(f :  typing.Callable[['Parameter', 'Parameterized', typi
 
 
 
-class ParameterMetaclass(type):
+ class ParameterMetaclass(type):
     """
     Metaclass allowing control over creation of Parameter classes.
     """
@@ -107,9 +109,11 @@ class ParameterMetaclass(type):
 
 
 
+
 class Parameter(metaclass=ParameterMetaclass):
     """
     An attribute descriptor for declaring parameters.
+
 
     Parameters are a special kind of class attribute.  Setting a
     Parameterized class attribute to be a Parameter instance causes
@@ -125,6 +129,7 @@ class Parameter(metaclass=ParameterMetaclass):
     (and delta inherited from Bar).  She would begin her class
     definitions with something like this::
 
+
        class Bar(Parameterized):
            delta = Parameter(default=0.6, doc='The difference between steps.')
            ...
@@ -135,8 +140,10 @@ class Parameter(metaclass=ParameterMetaclass):
            gamma = Parameter(default=1.0, doc='The ending value.')
            ...
 
+
     Class Foo would then have four parameters, with delta defaulting
     to 0.6.
+
 
     Parameters have several advantages over plain attributes:
 
@@ -197,10 +204,10 @@ class Parameter(metaclass=ParameterMetaclass):
     #   attrib_name for the Parameter); in the code, this is called
     #   the internal_name.
 
-
     # So that the extra features of Parameters do not require a lot of
     # overhead, Parameters are implemented using __slots__ (see
     # http://www.python.org/doc/2.4/ref/slots.html). 
+
 
     __slots__ = ['default', 'doc', 'constant', 'readonly', 'allow_None',
                 'per_instance_descriptor', 'deepcopy_default', 'class_member', 'precedence', 
@@ -272,6 +279,7 @@ class Parameter(metaclass=ParameterMetaclass):
         because each instance, once created, will then have an
         independently deepcopied value.
 
+
         class_member : To make a ... 
 
         precedence: a numeric value, usually in the range 0.0 to 1.0,
@@ -324,10 +332,12 @@ class Parameter(metaclass=ParameterMetaclass):
             else:
                 raise # exc , dont raise exc as it will cause multiple tracebacks
 
+
         super(Parameter, self).__setattr__(attribute, value)
 
         if slot_attribute and hasattr(self, '_disable_post_slot_set') and not self._disable_post_slot_set:
             self._post_slot_set(attribute, old, value)
+
 
         if old is NotImplemented or not isinstance(self.owner, Parameterized):
             return
@@ -572,6 +582,7 @@ class Event:
     type: typing.Optional[str]
 
 
+
 @contextmanager
 def edit_constant(obj : typing.Union['Parameterized', 'Parameter']):
     """
@@ -724,7 +735,6 @@ class Watcher:
                   the watcher. Lower precedence values are executed
                   with higher priority.
     """
-
     inst : "Parameterized"
     cls : "ParameterizedMetaclass"
     fn : typing.Callable
@@ -818,7 +828,6 @@ def _skip_event(*events : Event, **kwargs) -> bool:
     return True
 
 
-
 class Comparator(object):
     """
     Comparator defines methods for determining whether two objects
@@ -850,6 +859,7 @@ class Comparator(object):
     def is_equal(cls, obj1 : typing.Any, obj2 : typing.Any) -> bool:
         for eq_type, eq in cls.equalities.items():
             if ((isinstance(eq_type, FunctionType) and eq_type(obj1) and eq_type(obj2))
+
                 or (isinstance(obj1, eq_type) and isinstance(obj2, eq_type))):
                 return eq(obj1, obj2)
         if isinstance(obj2, (list, set, tuple)):
@@ -868,6 +878,7 @@ class Comparator(object):
 
     @classmethod
     def compare_mapping(cls, obj1 : typing.Any, obj2 : typing.Any) -> bool:
+
         if type(obj1) != type(obj2) or len(obj1) != len(obj2): return False
         for k in obj1:
             if k in obj2:
@@ -1218,7 +1229,6 @@ class EventDispatcherState:
     @watchers.setter
     def watchers(self, value):
         self._watchers[threading.get_ident()] = value
-
 
 
 class EventDispatcher:
@@ -1707,6 +1717,7 @@ class ParameterizedMetaclass(type):
     used to find out if a class is abstract or not.
     """
     def __init__(mcs, name : str, bases : typing.Tuple, dict_ : dict) -> None:
+
         """
         Initialize the class object (not an instance of the class, but
         the class itself).
@@ -1835,12 +1846,20 @@ class Parameterized(metaclass=ParameterizedMetaclass):
     def parameters(self) -> InstanceParameters:
         return self._param_container
         
+
     # 'Special' methods
     def __getstate__(self):
         """
         Save the object's state: return a dictionary that is a shallow
         copy of the object's __dict__ and that also includes the
         object's __slots__ (if it has any).
+        
+        Note that Parameterized object pickling assumes that
+        attributes to be saved are only in __dict__ or __slots__
+        (the standard Python places to store attributes, so that's a
+        reasonable assumption). (Additionally, class attributes that
+        are Parameters are also handled, even when they haven't been
+        instantiated - see PickleableClassAttributes.)
         """
         state = self.__dict__.copy()
         for slot in get_occupied_slots(self):
@@ -1851,6 +1870,7 @@ class Parameterized(metaclass=ParameterizedMetaclass):
         # reasonable assumption). (Additionally, class attributes that
         # are Parameters are also handled, even when they haven't been
         # instantiated - see PickleableClassAttributes.)
+
         return state
 
     def __setstate__(self, state):
@@ -1887,8 +1907,6 @@ class Parameterized(metaclass=ParameterizedMetaclass):
         for name,value in state.items():
             setattr(self,name,value)
         self.initialized=True
-
-
 
 
 # As of Python 2.6+, a fn's **args no longer has to be a
@@ -2085,4 +2103,5 @@ def parameterized_class(name, params, bases = Parameterized):
     if not (isinstance(bases, list) or isinstance(bases, tuple)):
         bases=[bases]
     return type(name, tuple(bases), params)
+
 

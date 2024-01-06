@@ -57,6 +57,7 @@ from .parameterized import (Parameterized, ParameterizedFunction, ParamOverrides
 
 from .logger import get_logger, logging_level, VERBOSE
 
+
 # Determine up-to-date version information, if possible, but with a
 # safe fallback to ensure that this file and parameterized.py are the
 # only two required files.
@@ -65,4 +66,3 @@ try:
     __version__ = str(Version(fpath=__file__, archive_commit="$Format:%h$", reponame="param"))
 except:
     __version__ = "0.0.0+unknown"
-
