@@ -1,95 +1,89 @@
-import logging
-from contextlib import contextmanager
-from logging import DEBUG, INFO, WARNING, ERROR, CRITICAL, Logger
-from inspect import getmro 
-from typing import List
-import textwrap
-
-T = textwrap.TextWrapper(
-    width = 80,
-    expand_tabs=False,
-    drop_whitespace = True,
-    replace_whitespace= True,
-    fix_sentence_endings = True,       
-)
-
-def wrap_error_text(text):
-    # return T.wrap(text)
-    #'\n'+'\n'.join([line.lstrip() 
-    return textwrap.fill(
-        text = textwrap.dedent(text).lstrip(),
-        width = 80,
-        initial_indent='\n',
-        expand_tabs=True,
-        drop_whitespace = True,
-        replace_whitespace= True,
-    )
-
-VERBOSE = INFO - 1
-logging.addLevelName(VERBOSE, "VERBOSE")
-    
-def get_logger(name : str = None) -> Logger:
-    if name is None:
-        root_logger = logging.getLogger('param')
-        if not root_logger.handlers:
-            root_logger.setLevel(logging.INFO)
-            formatter = logging.Formatter(
-                fmt='%(levelname)s:%(name)s: %(message)s')
-            handler = logging.StreamHandler()
-            handler.setFormatter(formatter)
-            root_logger.addHandler(handler)
-            return root_logger
-    else:
-        return logging.getLogger('param.' + name)
+from collections import OrderedDict
+import sys
+import inspect
+import typing
+from functools import reduce, partial
 
 
-@contextmanager
-def logging_level(level : int):
-    """
-    Temporarily modify param's logging level.
-    """
-    level = level.upper()
-    levels = [DEBUG, INFO, WARNING, ERROR, CRITICAL, VERBOSE]
-    level_names = ['DEBUG', 'INFO', 'WARNING', 'ERROR', 'CRITICAL', 'VERBOSE']
-
-    if level not in level_names:
-        raise Exception("Level %r not in %r" % (level, levels))
-
-    param_logger = get_logger()
-    logging_level = param_logger.getEffectiveLevel()
-    param_logger.setLevel(levels[level_names.index(level)])
-    try:
-        yield None
-    finally:
-        param_logger.setLevel(logging_level)
-
-
-def classlist(class_ : type) -> List[type]:
+def classlist(class_ : typing.Any) -> typing.Tuple[type]:
     """
     Return a list of the class hierarchy above (and including) the given class.
 
     Same as `inspect.getmro(class_)[::-1]`
     """
-    return getmro(class_)[::-1]
+    return inspect.getmro(class_)[::-1]
+    
+
+def get_dot_resolved_attr(obj : typing.Any, attr : str, *args):
+    def _getattr(obj, attr):
+        return getattr(obj, attr, *args)
+    return reduce(_getattr, [obj] + attr.split('.'))
 
 
-def descendents(class_ : type) -> List[type]:
+def iscoroutinefunction(function : typing.Callable) -> bool:
     """
-    Return a list of the class hierarchy below (and including) the given class.
-
-    The list is ordered from least- to most-specific.  Can be useful for
-    printing the contents of an entire class hierarchy.
+    Whether the function is an asynchronous coroutine function.
     """
-    assert isinstance(class_,type)
-    q = [class_]
-    out = []
-    while len(q):
-        x = q.pop(0)
-        out.insert(0,x)
-        for b in x.__subclasses__():
-            if b not in q and b not in out:
-                q.append(b)
-    return out[::-1]
+    import asyncio
+    try:
+        return (
+            inspect.isasyncgenfunction(function) or
+            asyncio.iscoroutinefunction(function)
+        )
+    except AttributeError:
+        return False
+    
+
+def get_method_owner(method : typing.Callable) -> typing.Any:
+    """
+    Gets the instance that owns the supplied method
+    """
+    if not inspect.ismethod(method):
+        return None
+    if isinstance(method, partial):
+        method = method.func
+    return method.__self__ if sys.version_info.major >= 3 else method.im_self
 
 
-__all__ = ['get_logger', 'logging_level', 'wrap_error_text', 'classlist', 'descendents']
+def is_ordered_dict(d):
+    """
+    Predicate checking for ordered dictionaries. OrderedDict is always
+    ordered, and vanilla Python dictionaries are ordered for Python 3.6+
+    """
+    py3_ordered_dicts = (sys.version_info.major == 3) and (sys.version_info.minor >= 6)
+    vanilla_odicts = (sys.version_info.major > 3) or py3_ordered_dicts
+    return isinstance(d, OrderedDict)or (vanilla_odicts and isinstance(d, dict))
+
+
+def get_all_slots(class_):
+    """
+    Return a list of slot names for slots defined in `class_` and its
+    superclasses.
+    """
+    # A subclass's __slots__ attribute does not contain slots defined
+    # in its superclass (the superclass' __slots__ end up as
+    # attributes of the subclass).
+    all_slots = []
+    parent_param_classes = [c for c in classlist(class_)[1::]]
+    for c in parent_param_classes:
+        if hasattr(c,'__slots__'):
+            all_slots+=c.__slots__
+    return all_slots
+
+
+def get_occupied_slots(instance):
+    """
+    Return a list of slots for which values have been set.
+
+    (While a slot might be defined, if a value for that slot hasn't
+    been set, then it's an AttributeError to request the slot's
+    value.)
+    """
+    return [slot for slot in get_all_slots(type(instance))
+            if hasattr(instance, slot)]
+
+
+
+
+__all__ = ['classlist', 'get_dot_resolved_attr', 'iscoroutinefunction', 'get_method_owner', 'get_all_slots', 
+        'get_occupied_slots']

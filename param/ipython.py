@@ -263,9 +263,9 @@ class ParamPager(object):
         """
         title = None
         if not self.metaclass:
-            parameterized_object = isinstance(param_obj, param.Parameterized)
+            parameterized_object = isinstance(param_obj, param.parameterized)
             parameterized_class = (isinstance(param_obj,type)
-                                   and  issubclass(param_obj,param.Parameterized))
+                                   and  issubclass(param_obj,param.parameterized))
 
             if not (parameterized_object or parameterized_class):
                 print("Object is not a Parameterized class or object.")
