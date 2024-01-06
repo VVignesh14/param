@@ -38,6 +38,7 @@ class NumpyArray(ClassSelector):
             return None
         return numpy.asarray(value)
     
+    
 
 from pandas import DataFrame as pdDFrame
      
