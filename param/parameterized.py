@@ -67,7 +67,7 @@ def instance_descriptor(f :  typing.Callable[['Parameter', 'Parameterized', typi
 
 
 
- class ParameterMetaclass(type):
+class ParameterMetaclass(type):
     """
     Metaclass allowing control over creation of Parameter classes.
     """
@@ -140,10 +140,8 @@ class Parameter(metaclass=ParameterMetaclass):
            gamma = Parameter(default=1.0, doc='The ending value.')
            ...
 
-
     Class Foo would then have four parameters, with delta defaulting
     to 0.6.
-
 
     Parameters have several advantages over plain attributes:
 
@@ -279,8 +277,8 @@ class Parameter(metaclass=ParameterMetaclass):
         because each instance, once created, will then have an
         independently deepcopied value.
 
-
-        class_member : To make a ... 
+        class_member : set to True make parameter a class attribute instead 
+        of instance attribute. 
 
         precedence: a numeric value, usually in the range 0.0 to 1.0,
         which allows the order of Parameters in a class to be defined in
@@ -332,12 +330,10 @@ class Parameter(metaclass=ParameterMetaclass):
             else:
                 raise # exc , dont raise exc as it will cause multiple tracebacks
 
-
         super(Parameter, self).__setattr__(attribute, value)
 
         if slot_attribute and hasattr(self, '_disable_post_slot_set') and not self._disable_post_slot_set:
             self._post_slot_set(attribute, old, value)
-
 
         if old is NotImplemented or not isinstance(self.owner, Parameterized):
             return
@@ -461,8 +457,8 @@ class Parameter(metaclass=ParameterMetaclass):
             
     def validate_and_adapt(self, value : typing.Any) -> typing.Any:
         """
-        modify the given value if a proper logical reasoning can be given.
-        returns modified value. Should not be mostly used unless the data stored is quite complex by structure.
+        validate the value and modify it if a proper logical reasoning can be given.
+        returns modified/unmodified value based on the developer's implementation. 
         """
         # raise NotImplementedError("overload this function in child class to validate your value and adapt it if necessary.")
         return value
@@ -582,7 +578,6 @@ class Event:
     type: typing.Optional[str]
 
 
-
 @contextmanager
 def edit_constant(obj : typing.Union['Parameterized', 'Parameter']):
     """
@@ -665,7 +660,6 @@ class SortedDependencies:
         return self
 
 
-
 def depends_on(*parameters, invoke : bool = True, on_init : bool = True, queued : bool = False) -> typing.Callable:
     """
     Annotates a function or Parameterized method to express its
@@ -698,7 +692,6 @@ def depends_on(*parameters, invoke : bool = True, on_init : bool = True, queued 
         func.param_dependency_info = _dinfo
         return func
     return decorator
-
 
 
 @dataclass
@@ -828,6 +821,7 @@ def _skip_event(*events : Event, **kwargs) -> bool:
     return True
 
 
+
 class Comparator(object):
     """
     Comparator defines methods for determining whether two objects
@@ -898,6 +892,7 @@ class UnresolvedWatcherInfo:
     static_dependencies : typing.List[ParameterDependencyInfo] 
     dynamic_dependencies : typing.List[DynamicDependencyInfo] 
     queued : bool = field(default = False)
+
 
 
 class EventResolver:
