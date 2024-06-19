@@ -68,23 +68,48 @@ class String(Parameter):
         self.regex = regex
     
     def validate_and_adapt(self, value : typing.Any) -> str: 
+        self._assert(value, self.regex, self.allow_None)
+        return value
+
+    @classmethod
+    def _assert(obj, value : typing.Any, regex : typing.Optional[str] = None, allow_None : bool = False) -> None: 
         """
-        validator
+        the method that implements the validator
         """
         if value is None: 
-            if self.allow_None:
+            if allow_None:
                 return 
             else:
-                raise ValueError(f"None not allowed for string type")
+                raise_ValueError(f"None not allowed for string type", obj)
         if not isinstance(value, str):
-            raise TypeError("given value is not string type, but {}.".format(type(value)))
-        if self.regex is not None:
-            match = re.match(self.regex, value) 
+            raise_TypeError("given value is not string type, but {}.".format(type(value)), obj)
+        if regex is not None:
+            match = re.match(regex, value) 
             if match is None or match.group(0) != value:
                 # match should be original string, not some substring
-                raise ValueError("given string value {} does not match regex {}.".format(value, self.regex))
+                raise_ValueError("given string value {} does not match regex {}.".format(value, regex), obj)
 
-  
+    @classmethod
+    def isinstance(cls, value : typing.Any, regex : typing.Optional[str] = None, allow_None : bool = False) -> bool:
+        """
+        verify if given value is a string confirming to regex. 
+        
+        Args:
+            value (Any): input value
+            regex (str, None): regex required to match, leave None if unnecessary
+            allow_None (bool): set True if None is tolerated
+
+        Returns:
+            bool: True if conformant, else False. Any exceptions due to wrong inputs resulting in TypeError and ValueError
+                also lead to False
+        """
+        try:
+            cls._assert(value, regex, allow_None)
+            return True
+        except (TypeError, ValueError):
+            return False
+
+   
 
 class Bytes(String):
     """
@@ -94,22 +119,33 @@ class Bytes(String):
     Similar to the string parameter, but instead of type basestring
     this parameter only allows objects of type bytes (e.g. b'bytes').
     """
-    def validate_and_adapt(self, value : typing.Any) -> str: 
+
+    @classmethod
+    def _assert(obj, value : typing.Any, regex : typing.Optional[bytes] = None, allow_None : bool = False) -> None:
         """
-        validator
+        verify if given value is a bytes confirming to regex. 
+        
+        Args:
+            value (Any): input value
+            regex (str, None): regex required to match, leave None if unnecessary
+            allow_None (bool): set True if None is tolerated
+
+        Raises:
+            TypeError: if given type is not bytes
+            ValueError: if regex does not match
         """
         if value is None: 
-            if self.allow_None:
+            if allow_None:
                 return 
             else:
-                raise ValueError(f"None not allowed for string type")
+                raise_ValueError(f"None not allowed for string type", obj)
         if not isinstance(value, bytes):
-            raise TypeError("given value is not bytes type, but {}.".format(type(value)))
-        if self.regex is not None:
-            match = re.match(self.regex, value) 
+            raise_TypeError("given value is not bytes type, but {}.".format(type(value)), obj)
+        if regex is not None:
+            match = re.match(regex, value) 
             if match is None or match.group(0) != value:
                 # match should be original string, not some substring
-                raise ValueError("given bytes value {} does not match regex {}.".format(value, self.regex))
+                raise_ValueError("given bytes value {} does not match regex {}.".format(value, regex), obj)
     
 
 
@@ -132,17 +168,31 @@ class IPAddress(Parameter):
         self.allow_ipv6 = allow_ipv6
 
     def validate_and_adapt(self, value: typing.Any) -> str:
-        if value is None and self.allow_None:
+        self._assert(value, self.allow_ipv4, self.allow_ipv6, self.allow_localhost, self.allow_None)
+        return value
+    
+    @classmethod
+    def _assert(obj, value : typing.Any, allow_ipv4 : bool = True, allow_ipv6 : bool = True,
+                allow_localhost : bool = True, allow_None : bool = False) -> None:
+        if value is None and allow_None:
             return
         if not isinstance(value, str):
-            raise TypeError('given value for IP address not a string, but type {}'.format(type(value)))
-        if self.allow_localhost and value == 'localhost':
+            raise_TypeError('given value for IP address not a string, but type {}'.format(type(value)), obj)
+        if allow_localhost and value == 'localhost':
             return
-        if not ((self.allow_ipv4 and (self.isipv4(value) or self.isipv4cidr(value))) 
-                        or (self.allow_ipv6 and (self.isipv6(value) or self.isipv6cidr(value)))):
-            raise ValueError("Given value {} is not a valid IP address.".format(value))
-        return value
-                
+        if not ((allow_ipv4 and (obj.isipv4(value) or obj.isipv4cidr(value))) 
+                        or (allow_ipv6 and (obj.isipv6(value) or obj.isipv6cidr(value)))):
+            raise_ValueError("Given value {} is not a valid IP address.".format(value), obj)
+        
+    @classmethod
+    def isinstance(obj, value : typing.Any, allow_ipv4 : bool = True, allow_ipv6 : bool = True ,
+                allow_localhost : bool = True, allow_None : bool = False) -> bool:
+        try:
+            obj._assert(value, allow_ipv4, allow_ipv6, allow_localhost, allow_None)
+            return True
+        except (TypeError, ValueError):
+            return False
+        
     @classmethod
     def isipv4(obj, value : str) -> bool:
         """
@@ -347,8 +397,7 @@ class Number(Parameter):
         Set to the given value, but cropped to be within the legal bounds.
         See crop_to_bounds for details on how cropping is done.
         """
-        if not isinstance(value, self.dtype):
-            raise TypeError("given value not of type {}, but type {}.".format(self.dtype, type(value)))
+        self._assert(value, self.dtype, None, (False, False), self.allow_None)
         bounded_value = self._crop_to_bounds(value) 
         super().__set__(obj, bounded_value)
 
@@ -384,48 +433,65 @@ class Number(Parameter):
         return value
     
     def validate_and_adapt(self, value: typing.Any) -> typing.Union[int, float]:
-        if self.allow_None and value is None:
-            return
-        if self.dtype is None:
-            if not self.isnumber(value):
-                raise TypeError("given value not of number type, but type {}.".format(type(value)))
-        elif not isinstance(value, self.dtype):
-            raise TypeError("given value not of type {}, but type {}.".format(self.dtype, type(value)))
-        if self.bounds:
-            vmin, vmax = self.bounds
-            incmin, incmax = self.inclusive_bounds   
-            if vmax is not None:
-                if incmax is True:
-                    if not value <= vmax:
-                        raise ValueError("given value must be at most {}, not {}.".format(vmax, value))
-                else:
-                    if not value < vmax:
-                        raise ValueError("Parameter must be less than {}, not {}.".format(vmax, value))
-
-            if vmin is not None:
-                if incmin is True:
-                    if not value >= vmin:
-                        raise ValueError("Parameter must be at least {}, not {}.".format(vmin, value))
-                else:
-                    if not value > vmin:
-                        raise ValueError("Parameter must be greater than {}, not {}.".format(vmin, value))
+        self._assert(value, self.dtype, None if self.crop_to_bounds else self.bounds, 
+                    self.inclusive_bounds, self.allow_None)
         if self.crop_to_bounds and self.bounds and value is not None:
             return self._crop_to_bounds(value)
         return value
         
+    @classmethod
+    def _assert(obj, value, dtype : typing.Tuple, bounds : typing.Optional[typing.Tuple] = None, 
+               inclusive_bounds : typing.Tuple[bool, bool] = (True, True), allow_None : bool = False):
+        if allow_None and value is None:
+            return
+        if dtype is None:
+            if not obj.isnumber(value):
+                raise_TypeError("given value not of number type, but type {}.".format(type(value)), 
+                                obj)
+        elif not isinstance(value, dtype):
+            raise_TypeError("given value not of type {}, but type {}.".format(dtype, type(value)), obj)
+        if bounds:
+            vmin, vmax = bounds
+            incmin, incmax = inclusive_bounds   
+            if vmax is not None:
+                if incmax is True:
+                    if not value <= vmax:
+                        raise_ValueError("given value must be at most {}, not {}.".format(vmax, value), obj)
+                else:
+                    if not value < vmax:
+                        raise_ValueError("Parameter must be less than {}, not {}.".format(vmax, value), obj)
+
+            if vmin is not None:
+                if incmin is True:
+                    if not value >= vmin:
+                        raise_ValueError("Parameter must be at least {}, not {}.".format(vmin, value), obj)
+                else:
+                    if not value > vmin:
+                        raise_ValueError("Parameter must be greater than {}, not {}.".format(vmin, value), obj)
+            return value 
+    
     def _validate_step(self, value : typing.Any) -> None:
         if value is not None:
             if self.dtype: 
                 if not isinstance(value, self.dtype):
-                    raise ValueError("Step can only be None or {}, not type {}.".format(self.dtype, type(value)))
+                    raise_ValueError("Step can only be None or {}, not type {}.".format(self.dtype, type(value)), self)
             elif not self.isnumber(self.step):
-                raise ValueError("Step can only be None or numeric value, not type {}.".format(type(value)))
+                raise_ValueError("Step can only be None or numeric value, not type {}.".format(type(value)), self)
 
     def _post_slot_set(self, slot : str, old : typing.Any, value : typing.Any) -> None:
         if slot == 'step': 
             self._validate_step(value)
         return super()._post_slot_set(slot, old, value)
- 	
+
+    @classmethod
+    def isinstance(obj, value, dtype : typing.Tuple, bounds : typing.Optional[typing.Tuple] = None, 
+               inclusive_bounds : typing.Tuple[bool, bool] = (True, True), allow_None : bool = False):
+        try:
+            obj._assert(value, dtype, bounds, inclusive_bounds, allow_None)
+            return True
+        except (ValueError, TypeError):
+            return False 
+    	
     @classmethod
     def isnumber(cls, value : typing.Any) -> bool:
         if isinstance(value, numbers.Number): return True
@@ -455,7 +521,7 @@ class Integer(Number):
 
     def _validate_step(self, step : int):
         if step is not None and not isinstance(step, int):
-            raise ValueError("Step can only be None or an integer value, not type {}".format(type(step)))
+            raise_ValueError("Step can only be None or an integer value, not type {}".format(type(step)), self)
 
 
 
@@ -475,7 +541,7 @@ class Boolean(Parameter):
         if self.allow_None and value is None:
             return 
         elif not isinstance(value, bool): 
-            raise ValueError("given value not boolean type, but type {}".format(type(value)))
+            raise_ValueError("given value not boolean type, but type {}".format(type(value)), self)
         return value
 
 
@@ -506,24 +572,41 @@ class Iterable(Parameter):
         self.dtype = (list, tuple)
 
     def validate_and_adapt(self, value: typing.Any) -> typing.Union[typing.List, typing.Tuple]:
-        if value is None and self.allow_None:
-            return
-        if not isinstance(value, self.dtype):
-            raise ValueError("given value not of iterable type {}, but {}.".format(self.dtype, type(value)))
-        if self.bounds is not None:
-            if not (len(value) >= self.bounds[0] and len(value) <= self.bounds[1]):
-                raise ValueError("given iterable is not of the correct length ({} instead of between {} and {}).".format(
-                                len(value), 0 if not self.bounds[0] else self.bounds[0], self.bounds[1])) 
-        elif self.length is not None and len(value) != self.length:
-            raise ValueError("given iterable is not of correct length ({} instead of {})".format(len(value), self.length))
-        if self.item_type is not None: 
-            for val in value:
-                if not isinstance(val, self.item_type):
-                    raise TypeError("not all elements of given iterable of item type {}, found object of type {}".format(
-                        self.item_type, type(val)))
+        self._assert(value, self.bounds, self.length, self.dtype, self.item_type, self.allow_None)
         return value
+        
+    @classmethod
+    def _assert(obj, value : typing.Any, bounds : typing.Optional[typing.Tuple[int, int]] = None, 
+            length : typing.Optional[int] = None, dtype :  typing.Union[type, typing.Tuple] = (list, tuple), 
+            item_type : typing.Any = None, allow_None : bool = False) -> None:
+        if value is None and allow_None:
+            return
+        if not isinstance(value, dtype):
+            raise_ValueError("given value not of iterable type {}, but {}.".format(dtype, type(value)), obj)
+        if bounds is not None:
+            if not (len(value) >= bounds[0] and len(value) <= bounds[1]):
+                raise_ValueError("given iterable is not of the correct length ({} instead of between {} and {}).".format(
+                                len(value), 0 if not bounds[0] else bounds[0], bounds[1]), obj) 
+        elif length is not None and len(value) != length:
+            raise_ValueError("given iterable is not of correct length ({} instead of {})".format(len(value), length), 
+                             obj)
+        if item_type is not None: 
+            for val in value:
+                if not isinstance(val, item_type):
+                    raise_TypeError("not all elements of given iterable of item type {}, found object of type {}".format(
+                        item_type, type(val)), obj)
 
-   
+    @classmethod
+    def isinstance(obj, value : typing.Any, bounds : typing.Optional[typing.Tuple[int, int]], 
+                length : typing.Optional[int] = None, dtype : typing.Union[type, typing.Tuple] = (list, tuple), 
+                item_type : typing.Any = None, allow_None : bool = False) -> bool:
+        try: 
+            obj._assert(value, bounds, length, dtype, item_type, allow_None)
+            return True 
+        except (ValueError, TypeError):
+            return False
+
+
 
 class Tuple(Iterable):
 
@@ -549,7 +632,8 @@ class Tuple(Iterable):
             value = tuple(value) 
         if self.accept_item and not isinstance(value, (list, tuple, type(None))):
             value = (value,)
-        return super().validate_and_adapt(value)
+        self._assert(value, self.bounds, self.length, self.dtype, self.item_type, self.allow_None)
+        return value 
     
     @classmethod
     def serialize(cls, value):
@@ -598,7 +682,8 @@ class List(Iterable):
     def validate_and_adapt(self, value: typing.Any) -> typing.Tuple:
         if self.accept_tuple and isinstance(value, tuple):
             value = list(value)
-        return super().validate_and_adapt(value)
+        self._assert(value, self.bounds, self.length, self.dtype, self.item_type, self.allow_None)
+        return value 
 
 
 
@@ -615,7 +700,7 @@ class Callable(Parameter):
     def validate_and_adapt(self, value : typing.Any) -> typing.Callable:
         if (self.allow_None and value is None) or callable(value):
             return value
-        raise ValueError("given value not a callable object, but type {}.".format(type(value)))
+        raise_ValueError("given value not a callable object, but type {}.".format(type(value)), self)
        
 
 
@@ -660,8 +745,8 @@ class Composite(Parameter):
 
     def validate_and_adapt(self, value):
         if not len(value) == len(self.attribs):
-            raise ValueError("Compound parameter got the wrong number of values (needed {}, but got {}).".format(
-                        len(self.attribs), len(value)))
+            raise_ValueError("Compound parameter got the wrong number of values (needed {}, but got {}).".format(
+                        len(self.attribs), len(value)), self)
         return value
 
     def _post_setter(self, obj, val):
@@ -745,8 +830,8 @@ class Selector(SelectorBase):
         val must be None or one of the objects in self.objects.
         """
         if not (value in self.objects or (self.allow_None and value is None)):
-            raise ValueError("given value not in list of possible objects, valid options include {}".format(
-                get_iterable_printfriendly_repr(self.objects)))
+            raise_ValueError("given value not in list of possible objects, valid options include {}".format(
+                get_iterable_printfriendly_repr(self.objects)), self)
         return value
 
     @property
@@ -795,12 +880,12 @@ class ClassSelector(SelectorBase):
             return
         if self.isinstance:
             if not isinstance(value, self.class_):
-                raise ValueError("{} parameter {} value must be an instance of {}, not {}.".format(
-                    self.__class__.__name__, self.name, self._get_class_name(), value))
+                raise_ValueError("{} parameter {} value must be an instance of {}, not {}.".format(
+                    self.__class__.__name__, self.name, self._get_class_name(), value), self)
         else:
             if not issubclass(value, self.class_):
-               raise ValueError("{} parameter {} must be a subclass of {}, not {}.".format(
-                    self.__class__.__name__, self.name, self._get_class_name(), value.__name__))
+               raise_ValueError("{} parameter {} must be a subclass of {}, not {}.".format(
+                    self.__class__.__name__, self.name, self._get_class_name(), value.__name__), self)
         return value
 
     @property
@@ -858,11 +943,11 @@ class TupleSelector(Selector):
             if isinstance(value, list) and self.accept_list:
                 value = tuple(value)
             if not isinstance(value, tuple):
-                raise ValueError(f"object {value} not specified as a valid member of list of objects.")
+                raise_ValueError(f"object {value} not specified as a valid member of list of objects.", self)
             else:
                 for obj in value:
                     if obj not in self.objects: 
-                        raise ValueError("object {} not specified as a valid member of list of objects.".format(obj))
+                        raise_ValueError("object {} not specified as a valid member of list of objects.".format(obj), self)
         return value
 
 

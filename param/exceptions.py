@@ -2,8 +2,6 @@ import textwrap
 import typing
 from contextlib import contextmanager
 
-
-
 def wrap_error_text(text : str) -> str:
     # return T.wrap(text)
     #'\n'+'\n'.join([line.lstrip() 
@@ -13,6 +11,22 @@ def wrap_error_text(text : str) -> str:
         expand_tabs=True,
         replace_whitespace= True,
     )
+
+def raise_TypeError(message, parameter) -> typing.NoReturn:
+    owner_str = ''
+    if isinstance(parameter, Parameter):
+        owner_str = f" Owner info : {parameter.owner}, parameter name : {parameter.name}."
+    elif issubclass(parameter, Parameter):
+        owner_str = ''
+    raise TypeError(message + owner_str)
+
+def raise_ValueError(message, parameter) -> typing.NoReturn:
+    owner_str = ''
+    if isinstance(parameter, Parameter):
+        owner_str = f" Owner info : {parameter.owner}, parameter name : {parameter.name}."
+    elif issubclass(parameter, Parameter):
+        owner_str = ''
+    raise ValueError(message + owner_str)
 
 
 def get_iterable_printfriendly_repr(iterable):

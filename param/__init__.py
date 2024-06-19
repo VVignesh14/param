@@ -53,10 +53,9 @@ Parameters and Parameterized classes.
 """
 from . import exceptions
 from .parameterized import (Parameterized, ParameterizedFunction, ParamOverrides, Parameter,
-    depends_on, instance_descriptor, discard_events, edit_constant, )
+    depends_on, instance_descriptor, discard_events, edit_constant)
 
 from .logger import get_logger, logging_level, VERBOSE
-
 
 # Determine up-to-date version information, if possible, but with a
 # safe fallback to ensure that this file and parameterized.py are the
@@ -66,3 +65,4 @@ try:
     __version__ = str(Version(fpath=__file__, archive_commit="$Format:%h$", reponame="param"))
 except:
     __version__ = "0.0.0+unknown"
+

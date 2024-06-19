@@ -1,6 +1,7 @@
 import typing
 import numpy
 from types import FunctionType
+
 from .parameterized import Parameterized, ParameterizedMetaclass
 from .parameters import *
 
@@ -37,7 +38,6 @@ class NumpyArray(ClassSelector):
         if value == 'null' or value is None:
             return None
         return numpy.asarray(value)
-    
     
 
 from pandas import DataFrame as pdDFrame
