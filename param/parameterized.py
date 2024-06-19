@@ -28,7 +28,6 @@ from .utils import *
 from .exceptions import *
 from .serializer import serializers
 
-
 try:
     # In case the optional ipython module is unavailable
     from .ipython import ParamPager
@@ -37,7 +36,6 @@ except:
     param_pager = None
 
 dt_types = (datetime.datetime, datetime.date)
-
 
 try:
     import numpy as np
@@ -109,11 +107,9 @@ class ParameterMetaclass(type):
 
 
 
-
 class Parameter(metaclass=ParameterMetaclass):
     """
     An attribute descriptor for declaring parameters.
-
 
     Parameters are a special kind of class attribute.  Setting a
     Parameterized class attribute to be a Parameter instance causes
@@ -128,7 +124,6 @@ class Parameter(metaclass=ParameterMetaclass):
     subclass of Bar, and Foo has parameters alpha, sigma, and gamma
     (and delta inherited from Bar).  She would begin her class
     definitions with something like this::
-
 
        class Bar(Parameterized):
            delta = Parameter(default=0.6, doc='The difference between steps.')
@@ -202,14 +197,14 @@ class Parameter(metaclass=ParameterMetaclass):
     #   attrib_name for the Parameter); in the code, this is called
     #   the internal_name.
 
+
     # So that the extra features of Parameters do not require a lot of
     # overhead, Parameters are implemented using __slots__ (see
     # http://www.python.org/doc/2.4/ref/slots.html). 
 
-
-    __slots__ = ['default', 'doc', 'constant', 'readonly', 'allow_None',
+    __slots__ = ['default', 'doc', 'constant', 'readonly', 'allow_None', 'label',
                 'per_instance_descriptor', 'deepcopy_default', 'class_member', 'precedence', 
-                'owner', 'name', '_internal_name', 'watchers', 'overloads',
+                'owner', 'name', '_internal_name', 'watchers', 'fget', 'fset', 'fdel',
                 '_disable_post_slot_set']
 
     # Note: When initially created, a Parameter does not know which
@@ -217,8 +212,8 @@ class Parameter(metaclass=ParameterMetaclass):
     # class is created, owner, name, and _internal_name are
     # set.
 
-    def __init__(self, default : typing.Any, *, doc : typing.Optional[str] = None,
-                constant : bool = False, readonly : bool = False, allow_None : bool = False,
+    def __init__(self, default : typing.Any, *, doc : typing.Optional[str] = None, constant : bool = False, 
+                readonly : bool = False, allow_None : bool = False, label : typing.Optional[str] = None,
                 per_instance_descriptor : bool = False, deepcopy_default : bool = False, class_member : bool = False,
                 fget : typing.Optional[typing.Callable] = None, fset : typing.Optional[typing.Callable] = None, 
                 fdel : typing.Optional[typing.Callable] = None, precedence : typing.Optional[float] = None) -> None:  # pylint: disable-msg=R0913
@@ -277,8 +272,7 @@ class Parameter(metaclass=ParameterMetaclass):
         because each instance, once created, will then have an
         independently deepcopied value.
 
-        class_member : set to True make parameter a class attribute instead 
-        of instance attribute. 
+        class_member : To make a ... 
 
         precedence: a numeric value, usually in the range 0.0 to 1.0,
         which allows the order of Parameters in a class to be defined in
@@ -299,13 +293,15 @@ class Parameter(metaclass=ParameterMetaclass):
         self.constant = constant # readonly is also constant however constants can be set once
         self.readonly = readonly
         self.allow_None = constant or allow_None
+        self.label = label
         self.per_instance_descriptor = per_instance_descriptor
         self.deepcopy_default = deepcopy_default
         self.class_member = class_member
         self.precedence = precedence
-        self.watchers : typing.Dict[str, typing.List] = {}
-        self.overloads : typing.Dict[str, typing.Union[typing.Callable, None]] = dict(fget=fget, 
-                                                                                fset=fset, fdel=fdel)
+        self.watchers = {} # typing.Dict[str, typing.List]
+        self.fget = fget # type: typing.Union[typing.Callable, None]
+        self.fset = fset # type: typing.Union[typing.Callable, None]
+        self.fdel = fdel # type: typing.Union[typing.Callable, None]
         
     def __set_name__(self, owner : typing.Any, attrib_name : str) -> None:
         self._internal_name = f"_{attrib_name}_param_value"
@@ -353,7 +349,7 @@ class Parameter(metaclass=ParameterMetaclass):
         """
         # __parent_slots__ attribute is needed for entry into this function correctly otherwise 
         # slot_attribute in __setattr__ will have wrong boolean flag
-        if slot == 'owner' and self.owner is not None:
+        if slot == 'owner' and self.owner is not None and self.fget is None:
             with disable_post_slot_set(self):
                 self.default = self.validate_and_adapt(self.default)
  
@@ -370,11 +366,12 @@ class Parameter(metaclass=ParameterMetaclass):
         instance's value, if one has been set - otherwise produce the
         class's value (default).
         """        
-        if obj is None:
+        if self.class_member:
+            return objtype.__dict__.get(self._internal_name, self.default)
+        if not obj:
             return self 
-        fget = self.overloads['fget'] 
-        if fget is not None:     
-            return fget(obj) 
+        if self.fget is not None:     
+            return self.fget(obj) 
         return obj.__dict__.get(self._internal_name, self.default)
        
     @instance_descriptor
@@ -404,7 +401,7 @@ class Parameter(metaclass=ParameterMetaclass):
         item in a list).
         """
         if self.readonly:
-            raise_TypeError("Read-only parameter cannot be set/modified.", self)
+            raise_ValueError("Read-only parameter cannot be set/modified.", self)
         
         value = self.validate_and_adapt(value)
 
@@ -415,14 +412,13 @@ class Parameter(metaclass=ParameterMetaclass):
             old = None
             if (obj.__dict__.get(self._internal_name, NotImplemented) != NotImplemented) or self.default is not None: 
                 # Dont even entertain any type of setting, even if its the same value
-                raise_TypeError("Constant parameter cannot be modified.", self)
+                raise_ValueError("Constant parameter cannot be modified.", self)
         else:
             old = obj.__dict__.get(self._internal_name, self.default)
 
         # The following needs to be optimised, probably through lambda functions?
-        fset = self.overloads['fset']
-        if fset is not None:
-            fset(obj, value) 
+        if self.fset is not None:
+            self.fset(obj, value) 
         else: 
             obj.__dict__[self._internal_name] = value
         
@@ -457,10 +453,9 @@ class Parameter(metaclass=ParameterMetaclass):
             
     def validate_and_adapt(self, value : typing.Any) -> typing.Any:
         """
-        validate the value and modify it if a proper logical reasoning can be given.
-        returns modified/unmodified value based on the developer's implementation. 
+        Validate the given value and adapt it if a proper logical reasoning can be given, for example, cropping a number
+        to its bounds. Returns modified value. 
         """
-        # raise NotImplementedError("overload this function in child class to validate your value and adapt it if necessary.")
         return value
      
     def _post_value_set(self, obj : typing.Union['Parameterized', typing.Any], value : typing.Any) -> None:
@@ -470,8 +465,7 @@ class Parameter(metaclass=ParameterMetaclass):
         """
         All Parameters have slots, not a dict, so we have to support
         pickle and deepcopy ourselves.
-        """
-        
+        """        
         state = {}
         for slot in self.__slots__ + self.__parent_slots__:
             state[slot] = getattr(self, slot)
@@ -498,17 +492,29 @@ class Parameter(metaclass=ParameterMetaclass):
                 setattr(self,k,v)
         
     def getter(self, func : typing.Callable) -> typing.Callable:
-        self.overloads['fget'] = func 
+        """
+        Register a getter method by using this as a decorator.
+        """
+        self.fget = func 
         return func
 
     def setter(self, func : typing.Callable) -> typing.Callable: 
-        self.overloads['fset'] = func
+        """
+        Register a setter method by using this as a decorator. Getters are mandatory if setter is defined.
+        """
+        self.fset = func
         return func
     
     def deleter(self, func : typing.Callable) -> typing.Callable: 
-        self.overloads['fdel'] = func
+        """
+        Register a deleter method by using this as a decorator. Getters & Setters are mandatory if deleter is defined.
+        """
+        self.fdel = func
         return func
     
+    def __call__(self, func: typing.Callable) -> "Parameter":
+        return self.getter(func)
+      
     @classmethod
     def serialize(cls, value : typing.Any) -> typing.Any:
         "Given the parameter value, return a Python value suitable for serialization"
@@ -660,6 +666,7 @@ class SortedDependencies:
         return self
 
 
+
 def depends_on(*parameters, invoke : bool = True, on_init : bool = True, queued : bool = False) -> typing.Callable:
     """
     Annotates a function or Parameterized method to express its
@@ -692,6 +699,7 @@ def depends_on(*parameters, invoke : bool = True, on_init : bool = True, queued 
         func.param_dependency_info = _dinfo
         return func
     return decorator
+
 
 
 @dataclass
@@ -728,6 +736,7 @@ class Watcher:
                   the watcher. Lower precedence values are executed
                   with higher priority.
     """
+
     inst : "Parameterized"
     cls : "ParameterizedMetaclass"
     fn : typing.Callable
@@ -853,7 +862,6 @@ class Comparator(object):
     def is_equal(cls, obj1 : typing.Any, obj2 : typing.Any) -> bool:
         for eq_type, eq in cls.equalities.items():
             if ((isinstance(eq_type, FunctionType) and eq_type(obj1) and eq_type(obj2))
-
                 or (isinstance(obj1, eq_type) and isinstance(obj2, eq_type))):
                 return eq(obj1, obj2)
         if isinstance(obj2, (list, set, tuple)):
@@ -872,7 +880,6 @@ class Comparator(object):
 
     @classmethod
     def compare_mapping(cls, obj1 : typing.Any, obj2 : typing.Any) -> bool:
-
         if type(obj1) != type(obj2) or len(obj1) != len(obj2): return False
         for k in obj1:
             if k in obj2:
@@ -892,7 +899,6 @@ class UnresolvedWatcherInfo:
     static_dependencies : typing.List[ParameterDependencyInfo] 
     dynamic_dependencies : typing.List[DynamicDependencyInfo] 
     queued : bool = field(default = False)
-
 
 
 class EventResolver:
@@ -1224,6 +1230,7 @@ class EventDispatcherState:
     @watchers.setter
     def watchers(self, value):
         self._watchers[threading.get_ident()] = value
+
 
 
 class EventDispatcher:
@@ -1712,7 +1719,6 @@ class ParameterizedMetaclass(type):
     used to find out if a class is abstract or not.
     """
     def __init__(mcs, name : str, bases : typing.Tuple, dict_ : dict) -> None:
-
         """
         Initialize the class object (not an instance of the class, but
         the class itself).
@@ -1722,6 +1728,10 @@ class ParameterizedMetaclass(type):
         mcs._update_docstring_signature(dict_.get('parameterized_docstring_signature', False))
 
     def _create_param_container(mcs, mcs_members : dict):
+        """
+        overridable in ``Parameterized`` child if a subclass of ``Parameters`` 
+        was created by user. 
+        """
         mcs._param_container = ClassParameters(mcs, mcs_members) # value return when accessing cls/self.param
   
     @property
@@ -1841,20 +1851,12 @@ class Parameterized(metaclass=ParameterizedMetaclass):
     def parameters(self) -> InstanceParameters:
         return self._param_container
         
-
     # 'Special' methods
     def __getstate__(self):
         """
         Save the object's state: return a dictionary that is a shallow
         copy of the object's __dict__ and that also includes the
         object's __slots__ (if it has any).
-        
-        Note that Parameterized object pickling assumes that
-        attributes to be saved are only in __dict__ or __slots__
-        (the standard Python places to store attributes, so that's a
-        reasonable assumption). (Additionally, class attributes that
-        are Parameters are also handled, even when they haven't been
-        instantiated - see PickleableClassAttributes.)
         """
         state = self.__dict__.copy()
         for slot in get_occupied_slots(self):
@@ -1865,7 +1867,6 @@ class Parameterized(metaclass=ParameterizedMetaclass):
         # reasonable assumption). (Additionally, class attributes that
         # are Parameters are also handled, even when they haven't been
         # instantiated - see PickleableClassAttributes.)
-
         return state
 
     def __setstate__(self, state):
@@ -1902,6 +1903,8 @@ class Parameterized(metaclass=ParameterizedMetaclass):
         for name,value in state.items():
             setattr(self,name,value)
         self.initialized=True
+
+
 
 
 # As of Python 2.6+, a fn's **args no longer has to be a
@@ -2098,5 +2101,4 @@ def parameterized_class(name, params, bases = Parameterized):
     if not (isinstance(bases, list) or isinstance(bases, tuple)):
         bases=[bases]
     return type(name, tuple(bases), params)
-
 
